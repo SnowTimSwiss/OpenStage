@@ -1,0 +1,19 @@
+# Rust / Cargo
+/target/
+src-tauri/gen/
+
+# Node
+node_modules/
+dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
