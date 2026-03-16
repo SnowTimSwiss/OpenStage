@@ -1,6 +1,6 @@
-use tauri::Manager;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Monitor {
     pub name: String,
     pub width: u32,
@@ -15,7 +15,7 @@ fn get_monitors(app: tauri::AppHandle) -> Result<Vec<Monitor>, String> {
         Ok(monitors) => Ok(monitors
             .iter()
             .map(|m| Monitor {
-                name: m.name().unwrap_or("Unknown").to_string(),
+                name: m.name().map_or(String::from("Unknown"), |n| n.to_string()),
                 width: m.size().width,
                 height: m.size().height,
                 x: m.position().x,
