@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../../store/useStore";
-import { sendVideoControl } from "../../lib/events";
+import { openOutputWindow, sendVideoControl } from "../../lib/events";
 
 type FilterType = "all" | "image" | "video" | "pptx";
 
@@ -47,12 +47,15 @@ export default function MediaTab() {
   const removeVideo = useStore((s) => s.removeVideo);
 
   // PPTX Groups
-  const pptxGroups = useStore((s) => s.pptxGroups);
-  const expandedGroupId = useStore((s) => s.expandedGroupId);
-  const loadPptx = useStore((s) => s.loadPptx);
-  const toggleExpandGroup = useStore((s) => s.toggleExpandGroup);
-  const removeGroup = useStore((s) => s.removeGroup);
+	  const pptxGroups = useStore((s) => s.pptxGroups);
+	  const expandedGroupId = useStore((s) => s.expandedGroupId);
+	  const loadPptx = useStore((s) => s.loadPptx);
+	  const toggleExpandGroup = useStore((s) => s.toggleExpandGroup);
+	  const removeGroup = useStore((s) => s.removeGroup);
 	  const goLiveSlideFromGroup = useStore((s) => s.goLiveSlideFromGroup);
+	  const outputMonitorIndex = useStore((s) => s.outputMonitorIndex);
+	  const outputWindowOpen = useStore((s) => s.outputWindowOpen);
+	  const setOutputMonitor = useStore((s) => s.setOutputMonitor);
 
   // Drag & Drop State
   const dragIndex = useStore((s) => (s as any).dragIndex ?? -1);
@@ -76,9 +79,27 @@ export default function MediaTab() {
 	    setPptxPresentation(null);
 	  }
 
-	  function startPresentation(groupId: string) {
+	  async function ensureOutputVisible() {
+	    // If a monitor is configured, make sure the output window is opened and placed there.
+	    if (outputMonitorIndex !== null) {
+	      try {
+	        // Calling with the same index is fine; it will (re)open/reposition.
+	        await setOutputMonitor(outputMonitorIndex);
+	        return;
+	      } catch {
+	        // Fall through to just opening the output window.
+	      }
+	    }
+
+	    if (!outputWindowOpen) {
+	      await openOutputWindow();
+	    }
+	  }
+
+	  async function startPresentation(groupId: string) {
 	    const group = pptxGroups.find((g) => g.id === groupId);
 	    if (!group || group.slides.length === 0) return;
+	    await ensureOutputVisible();
 	    setPptxPresentation({ groupId, index: 0 });
 	    goLiveSlideFromGroup(groupId, 0);
 	  }
