@@ -165,6 +165,8 @@ function updateCountdownBgVolume(remainingSeconds: number) {
     countdownBackgroundMusicVolume,
     countdownBackgroundMusicFadeStartMinutes,
     countdownBackgroundMusicFullVolumeMinutes,
+    countdownBackgroundMusicFadeInStartPercent,
+    countdownBackgroundMusicFadeInStartMinutes,
   } = useStore.getState();
 
   const fadeStartSec = Math.max(0, countdownBackgroundMusicFadeStartMinutes) * 60;
@@ -173,11 +175,27 @@ function updateCountdownBgVolume(remainingSeconds: number) {
   const clampedFullSec = Math.min(fullSec, fadeStartSec);
   const rampSec = Math.max(0, fadeStartSec - clampedFullSec);
 
+  const fadeInStartPercent = Math.max(0, Math.min(100, countdownBackgroundMusicFadeInStartPercent)) / 100;
+  const fadeInStartSec = Math.max(0, countdownBackgroundMusicFadeInStartMinutes) * 60;
+
   let desired = 0;
   if (fadeStartSec <= 0) {
     desired = targetVolume;
   } else if (remainingSeconds > fadeStartSec) {
-    desired = 0;
+    // Before fade-in starts: check if we're in the fadeIn period
+    if (fadeInStartSec > 0 && remainingSeconds <= fadeInStartSec) {
+      // We're in the fadeIn period: ramp from fadeInStartPercent to targetVolume
+      const fadeInRampSec = fadeInStartSec - Math.max(fadeStartSec, clampedFullSec);
+      if (fadeInRampSec > 0) {
+        const fadeInT = (fadeInStartSec - remainingSeconds) / fadeInRampSec; // 0..1
+        const currentPercent = fadeInStartPercent + (1 - fadeInStartPercent) * fadeInT;
+        desired = Math.max(0, Math.min(1, currentPercent)) * targetVolume;
+      } else {
+        desired = fadeInStartPercent * targetVolume;
+      }
+    } else {
+      desired = 0;
+    }
   } else if (remainingSeconds <= clampedFullSec) {
     desired = targetVolume;
   } else if (rampSec <= 0) {
@@ -274,6 +292,8 @@ interface Store {
   countdownBackgroundMusicVolume: number;
   countdownBackgroundMusicFadeStartMinutes: number;
   countdownBackgroundMusicFullVolumeMinutes: number;
+  countdownBackgroundMusicFadeInStartPercent: number; // Start volume percentage for fade-in (0-100)
+  countdownBackgroundMusicFadeInStartMinutes: number; // Start fade-in X minutes before 0:00
   setCountdownLabel: (l: string) => void;
   setCountdownTargetTime: (t: string | null) => void;
   applyCountdownTargetTime: () => void;
@@ -283,6 +303,8 @@ interface Store {
   setCountdownBackgroundMusicVolume: (v: number) => void;
   setCountdownBackgroundFadeStartMinutes: (m: number) => void;
   setCountdownBackgroundFullVolumeMinutes: (m: number) => void;
+  setCountdownBackgroundFadeInStartPercent: (p: number) => void;
+  setCountdownBackgroundFadeInStartMinutes: (m: number) => void;
   startCountdown: () => void;
   stopCountdown: () => void;
   resetCountdown: () => void;
@@ -307,8 +329,8 @@ interface Store {
   musicCurrentTime: number;
   musicDuration: number;
   musicFadeDuration: number; // seconds for fade in/out
-  loadMusic: () => Promise<void>;
-  loadMusicFromFolder: () => Promise<void>;
+  loadMusic: (playlistId?: string | null) => Promise<void>;
+  loadMusicFromFolder: (playlistId?: string | null) => Promise<void>;
   resetAllMusic: () => void;
   setMusicIndex: (i: number) => void;
   setMusicPlaying: (p: boolean) => void;
@@ -642,6 +664,8 @@ export const useStore = create<Store>((set, get) => ({
   countdownBackgroundMusicVolume: 0.6,
   countdownBackgroundMusicFadeStartMinutes: 10,
   countdownBackgroundMusicFullVolumeMinutes: 2,
+  countdownBackgroundMusicFadeInStartPercent: 0,
+  countdownBackgroundMusicFadeInStartMinutes: 5,
 
   setCountdownLabel: (l) => set({ countdownLabel: l }),
   setCountdownTargetTime: (t) => set({ countdownTargetTime: t }),
@@ -695,6 +719,8 @@ export const useStore = create<Store>((set, get) => ({
   setCountdownBackgroundMusicVolume: (v) => set({ countdownBackgroundMusicVolume: normalizeVolume(v, 0.6) }),
   setCountdownBackgroundFadeStartMinutes: (m) => set({ countdownBackgroundMusicFadeStartMinutes: normalizeMinutes(m, 10) }),
   setCountdownBackgroundFullVolumeMinutes: (m) => set({ countdownBackgroundMusicFullVolumeMinutes: normalizeMinutes(m, 2) }),
+  setCountdownBackgroundFadeInStartPercent: (p) => set({ countdownBackgroundMusicFadeInStartPercent: Math.max(0, Math.min(100, p)) }),
+  setCountdownBackgroundFadeInStartMinutes: (m) => set({ countdownBackgroundMusicFadeInStartMinutes: normalizeMinutes(m, 5) }),
 
   startCountdown: () => {
     const { countdownTargetTime, countdownBackgroundPlaylistId, playlists } = get();
@@ -747,7 +773,8 @@ export const useStore = create<Store>((set, get) => ({
   stopCountdown: () => {
     if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
     set({ countdownRunning: false });
-    stopCountdownBackgroundMusic();
+    // Don't stop the music at 0:00 - let the current track finish playing
+    // stopCountdownBackgroundMusic();
     const { countdownRemaining, countdownLabel, countdownTheme, countdownTargetTime } = get();
     if (get().countdownLive) {
       sendToOutput({
@@ -850,8 +877,8 @@ export const useStore = create<Store>((set, get) => ({
 
   setMusicFadeDuration: (s) => set({ musicFadeDuration: s }),
 
-  loadMusic: async () => {
-    const { setLoading, setError, clearError } = get();
+  loadMusic: async (playlistId?: string | null) => {
+    const { setLoading, setError, clearError, playlists, addTrackToPlaylist } = get();
     try {
       setLoading(true);
       clearError();
@@ -869,6 +896,14 @@ export const useStore = create<Store>((set, get) => ({
         source: "local" as MusicSource,
       }));
       set((s) => ({ music: [...s.music, ...items] }));
+      
+      // Add to playlist if specified
+      if (playlistId) {
+        const playlist = playlists.find((p) => p.id === playlistId);
+        if (playlist) {
+          items.forEach((item) => addTrackToPlaylist(playlistId, item));
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Fehler beim Laden der Musik");
     } finally {
@@ -876,8 +911,8 @@ export const useStore = create<Store>((set, get) => ({
     }
   },
 
-  loadMusicFromFolder: async () => {
-    const { setLoading, setError, clearError } = get();
+  loadMusicFromFolder: async (playlistId?: string | null) => {
+    const { setLoading, setError, clearError, playlists, addTrackToPlaylist } = get();
     try {
       setLoading(true);
       clearError();
@@ -891,7 +926,7 @@ export const useStore = create<Store>((set, get) => ({
 
       const { readDir } = await import("@tauri-apps/plugin-fs");
       const audioExts = new Set(["mp3", "wav", "ogg", "flac", "aac", "m4a"]);
-      
+
       const entries = await readDir(folder as string);
       const audioFiles = entries.filter((entry) => {
         if (!entry.isFile) return false;
@@ -913,6 +948,14 @@ export const useStore = create<Store>((set, get) => ({
       // Sort alphabetically by name
       items.sort((a, b) => a.name.localeCompare(b.name));
       set((s) => ({ music: [...s.music, ...items] }));
+      
+      // Add to playlist if specified
+      if (playlistId) {
+        const playlist = playlists.find((p) => p.id === playlistId);
+        if (playlist) {
+          items.forEach((item) => addTrackToPlaylist(playlistId, item));
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Fehler beim Laden des Ordners");
     } finally {

@@ -40,6 +40,11 @@ export default function MusicTab() {
 	  );
   const [spotifyPlaylistUri, setSpotifyPlaylistUri] = useState("");
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showPlaylistSelect, setShowPlaylistSelect] = useState(false);
+  const [pendingImportType, setPendingImportType] = useState<"files" | "folder" | null>(null);
+  const [selectedPlaylistForImport, setSelectedPlaylistForImport] = useState<string | null>(null);
+  const [showCreatePlaylistForImport, setShowCreatePlaylistForImport] = useState(false);
+  const [newPlaylistNameForImport, setNewPlaylistNameForImport] = useState("");
 
   const current = music[musicIndex];
   const activePlaylist = activePlaylistId ? playlists.find((p) => p.id === activePlaylistId) : null;
@@ -106,6 +111,44 @@ export default function MusicTab() {
 
   function handleSelectPlaylist(playlistId: string | null) {
     setActivePlaylist(playlistId);
+  }
+
+  function handleImportWithPlaylist(type: "files" | "folder") {
+    setPendingImportType(type);
+    setSelectedPlaylistForImport(null);
+    setShowPlaylistSelect(true);
+  }
+
+  function handleConfirmPlaylistImport() {
+    if (!pendingImportType) return;
+    
+    if (showCreatePlaylistForImport && newPlaylistNameForImport.trim()) {
+      // Create new playlist and import
+      const newPlaylist = createPlaylist(newPlaylistNameForImport.trim());
+      if (pendingImportType === "files") {
+        loadMusic(newPlaylist.id);
+      } else {
+        loadMusicFromFolder(newPlaylist.id);
+      }
+      setNewPlaylistNameForImport("");
+      setShowCreatePlaylistForImport(false);
+    } else {
+      // Import to selected playlist or no playlist
+      if (pendingImportType === "files") {
+        loadMusic(selectedPlaylistForImport);
+      } else {
+        loadMusicFromFolder(selectedPlaylistForImport);
+      }
+    }
+    
+    setShowPlaylistSelect(false);
+    setPendingImportType(null);
+    setSelectedPlaylistForImport(null);
+  }
+
+  function handleCreatePlaylistForImport() {
+    setShowCreatePlaylistForImport(true);
+    setSelectedPlaylistForImport(null);
   }
 
 	  async function handleConnectSpotify() {
@@ -204,7 +247,7 @@ export default function MusicTab() {
 
           {/* Add Music Button */}
           <button
-            onClick={loadMusic}
+            onClick={() => handleImportWithPlaylist("files")}
             className="text-xs px-3 py-1.5 rounded font-medium"
             style={{ background: "#f97316", color: "white" }}
           >
@@ -213,7 +256,7 @@ export default function MusicTab() {
 
           {/* Add Folder Button */}
           <button
-            onClick={loadMusicFromFolder}
+            onClick={() => handleImportWithPlaylist("folder")}
             className="text-xs px-3 py-1.5 rounded font-medium"
             style={{ background: "#f97316", color: "white" }}
           >
@@ -347,7 +390,7 @@ export default function MusicTab() {
             <p className="text-white font-medium">Keine Musik geladen</p>
             <p className="text-sm" style={{ color: "#555" }}>MP3, WAV, FLAC, AAC und mehr</p>
             <div className="flex gap-2">
-              <button onClick={loadMusic} className="text-sm px-4 py-2 rounded" style={{ background: "#f97316", color: "white" }}>
+              <button onClick={() => handleImportWithPlaylist("files")} className="text-sm px-4 py-2 rounded" style={{ background: "#f97316", color: "white" }}>
                 Musik laden
               </button>
               <button onClick={() => setShowCreatePlaylist(true)} className="text-sm px-4 py-2 rounded" style={{ background: "#252525", color: "#aaa" }}>
@@ -643,6 +686,109 @@ export default function MusicTab() {
               </button>
               <button
                 onClick={() => setShowResetConfirm(false)}
+                className="flex-1 px-4 py-2 rounded text-sm font-medium"
+                style={{ background: "#252525", color: "#aaa" }}
+              >
+                Abbrechen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Playlist Select Modal for Import */}
+      {showPlaylistSelect && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-[#1a1a1a] rounded-lg p-6 w-96 border border-[#333]">
+            <div className="flex items-center gap-3 mb-4">
+              <span className="text-2xl">📁</span>
+              <h3 className="text-lg font-semibold text-white">
+                In Playlist importieren
+              </h3>
+            </div>
+
+            <p className="text-sm text-gray-300 mb-4">
+              Wähle eine Playlist für den Import oder erstelle eine neue:
+            </p>
+
+            {/* Create New Playlist Option */}
+            <div className="mb-4">
+              <button
+                onClick={handleCreatePlaylistForImport}
+                className="w-full px-4 py-2 rounded text-sm font-medium flex items-center justify-center gap-2"
+                style={{ background: showCreatePlaylistForImport ? "#f97316" : "#252525", color: showCreatePlaylistForImport ? "white" : "#aaa" }}
+              >
+                + Neue Playlist erstellen
+              </button>
+              
+              {showCreatePlaylistForImport && (
+                <div className="mt-2">
+                  <input
+                    type="text"
+                    value={newPlaylistNameForImport}
+                    onChange={(e) => setNewPlaylistNameForImport(e.target.value)}
+                    placeholder="Playlist-Name"
+                    className="w-full px-3 py-2 rounded bg-[#0a0a0a] text-white border border-[#333] text-sm"
+                    autoFocus
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Existing Playlists */}
+            <div className="mb-4">
+              <label className="text-xs text-gray-400 block mb-2">Oder wähle eine bestehende Playlist:</label>
+              <div className="max-h-40 overflow-y-auto space-y-1">
+                <button
+                  onClick={() => {
+                    setSelectedPlaylistForImport(null);
+                    setShowCreatePlaylistForImport(false);
+                    setNewPlaylistNameForImport("");
+                  }}
+                  className={`w-full text-left px-3 py-2 rounded text-xs transition-colors ${
+                    selectedPlaylistForImport === null && !showCreatePlaylistForImport
+                      ? "bg-[#f9731620] text-[#f97316] border border-[#f9731640]"
+                      : "text-gray-300 hover:bg-[#252525]"
+                  }`}
+                >
+                  📂 Keine Playlist (nur zur Queue hinzufügen)
+                </button>
+                {playlists.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => {
+                      setSelectedPlaylistForImport(p.id);
+                      setShowCreatePlaylistForImport(false);
+                      setNewPlaylistNameForImport("");
+                    }}
+                    className={`w-full text-left px-3 py-2 rounded text-xs transition-colors ${
+                      selectedPlaylistForImport === p.id
+                        ? "bg-[#f9731620] text-[#f97316] border border-[#f9731640]"
+                        : "text-gray-300 hover:bg-[#252525]"
+                    }`}
+                  >
+                    {p.source === "spotify" ? "🟢" : "📁"} {p.name} ({p.tracks.length})
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={handleConfirmPlaylistImport}
+                className="flex-1 px-4 py-2 rounded text-sm font-medium"
+                style={{ background: "#f97316", color: "white" }}
+              >
+                Importieren
+              </button>
+              <button
+                onClick={() => {
+                  setShowPlaylistSelect(false);
+                  setPendingImportType(null);
+                  setSelectedPlaylistForImport(null);
+                  setShowCreatePlaylistForImport(false);
+                  setNewPlaylistNameForImport("");
+                }}
                 className="flex-1 px-4 py-2 rounded text-sm font-medium"
                 style={{ background: "#252525", color: "#aaa" }}
               >

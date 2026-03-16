@@ -19,6 +19,8 @@ export default function CountdownTab() {
   const bgVolume = useStore((s) => s.countdownBackgroundMusicVolume);
   const fadeStartMin = useStore((s) => s.countdownBackgroundMusicFadeStartMinutes);
   const fullMin = useStore((s) => s.countdownBackgroundMusicFullVolumeMinutes);
+  const fadeInStartPercent = useStore((s) => s.countdownBackgroundMusicFadeInStartPercent);
+  const fadeInStartMin = useStore((s) => s.countdownBackgroundMusicFadeInStartMinutes);
   const setLabel = useStore((s) => s.setCountdownLabel);
   const setTargetTime = useStore((s) => s.setCountdownTargetTime);
   const applyTargetTime = useStore((s) => s.applyCountdownTargetTime);
@@ -27,6 +29,8 @@ export default function CountdownTab() {
   const setBgVolume = useStore((s) => s.setCountdownBackgroundMusicVolume);
   const setFadeStartMin = useStore((s) => s.setCountdownBackgroundFadeStartMinutes);
   const setFullMin = useStore((s) => s.setCountdownBackgroundFullVolumeMinutes);
+  const setFadeInStartPercent = useStore((s) => s.setCountdownBackgroundFadeInStartPercent);
+  const setFadeInStartMin = useStore((s) => s.setCountdownBackgroundFadeInStartMinutes);
   const start = useStore((s) => s.startCountdown);
   const setLive = useStore((s) => s.setCountdownLive);
 
@@ -145,7 +149,7 @@ export default function CountdownTab() {
         {/* Background Music */}
         <div>
           <label className="text-xs font-medium block mb-2" style={{ color: "#666" }}>
-            🎵 Hintergrundmusik (endet bei 0:00)
+            🎵 Hintergrundmusik (spielt bei 0:00 zu Ende)
           </label>
           <select
             className="w-full text-sm px-3 py-2 rounded outline-none"
@@ -210,9 +214,52 @@ export default function CountdownTab() {
             </div>
           </div>
 
+          {/* Advanced Fade-In Options */}
+          <div className="mt-3 p-3 rounded border" style={{ background: "#0f0f0f", borderColor: "#252525" }}>
+            <div className="text-[11px] font-medium mb-2" style={{ color: "#888" }}>
+              Advanced: Fade-In Optionen
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[11px] block mb-1" style={{ color: "#666" }}>
+                  Start Volumen (%)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={fadeInStartPercent}
+                  onChange={(e) => setFadeInStartPercent(Number(e.target.value))}
+                  className="w-full text-sm px-2 py-2 rounded outline-none"
+                  style={{ background: "#141414", border: "1px solid #252525", color: "#ddd" }}
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] block mb-1" style={{ color: "#666" }}>
+                  Fade-In ab (min)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={240}
+                  value={fadeInStartMin}
+                  onChange={(e) => setFadeInStartMin(Number(e.target.value))}
+                  className="w-full text-sm px-2 py-2 rounded outline-none"
+                  style={{ background: "#141414", border: "1px solid #252525", color: "#ddd" }}
+                />
+              </div>
+            </div>
+          </div>
+
           <p className="text-[11px] mt-2" style={{ color: "#555" }}>
             Startet stumm und blendet ab <span style={{ color: "#bbb" }}>{fadeStartMin}</span> min vor 0:00 bis auf 100% ein.
-            Die letzten <span style={{ color: "#bbb" }}>{fullMin}</span> min laeuft sie auf 100%. Stoppt bei 0:00.
+            Die letzten <span style={{ color: "#bbb" }}>{fullMin}</span> min laeuft sie auf 100%. Spielt bei 0:00 zu Ende.
+            {fadeInStartMin > 0 && fadeInStartPercent > 0 && (
+              <span className="block mt-1" style={{ color: "#888" }}>
+                Fade-In: Startet bei {fadeInStartPercent}% Volumen {fadeInStartMin} min vor 0:00.
+              </span>
+            )}
           </p>
         </div>
 
