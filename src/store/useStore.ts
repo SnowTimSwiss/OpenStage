@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { sendToOutput, openOutputWindow, assignOutputToMonitor, closeOutputWindow as closeOutputFn } from "../lib/events";
 import { secondsUntilTargetTime } from "../lib/formatTime";
+import { resolveSpotifyClientId } from "../lib/spotify";
 import type {
   Song, MediaItem, MusicItem, Playlist, SpotifyAuthState, MusicSource,
   Monitor, TabId, OutputMode, PptxGroup, CountdownTheme,
@@ -33,7 +34,7 @@ async function generateCodeChallenge(codeVerifier: string): Promise<string> {
 }
 
 async function exchangeCodeForToken(code: string): Promise<{ access_token: string; refresh_token: string; expires_in: number }> {
-  const clientId = import.meta.env.VITE_SPOTIFY_CLIENT_ID || "";
+  const clientId = resolveSpotifyClientId(import.meta.env.VITE_SPOTIFY_CLIENT_ID);
   const storedRedirectUri = localStorage.getItem(SPOTIFY_REDIRECT_KEY) || "";
   const redirectUri =
     storedRedirectUri ||
@@ -399,9 +400,33 @@ export const useStore = create<Store>((set, get) => ({
 
   loadPptx: async () => {
     const { setLoading, setError, clearError } = get();
+    const { invoke } = await import("@tauri-apps/api/core");
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    
     try {
       setLoading(true);
       clearError();
+      
+      // Check if LibreOffice is installed
+      const loStatus = await invoke<any>("check_libreoffice_installed");
+      
+      if (!loStatus.installed) {
+        // Show install prompt
+        const userConfirmed = window.confirm(
+          "LibreOffice wird benötigt, um PowerPoint-Dateien zu importieren.\n\n" +
+          "Möchten Sie LibreOffice jetzt herunterladen?\n\n" +
+          "LibreOffice ist eine kostenlose Open-Source-Office-Suite, die PPTX-Dateien verarbeiten kann."
+        );
+        
+        if (userConfirmed) {
+          const downloadUrl = await invoke<string>("get_libreoffice_download_url");
+          await openUrl(downloadUrl);
+        }
+        
+        setLoading(false);
+        return;
+      }
+      
       const files = await openDialog({
         multiple: true,
         filters: [{ name: "PowerPoint", extensions: ["pptx"] }],
@@ -411,7 +436,9 @@ export const useStore = create<Store>((set, get) => ({
 
       for (const file of arr) {
         const filePath = file as string;
-        const pptxFile = await invoke<any>("import_pptx", { path: filePath });
+        
+        // Import PPTX using LibreOffice
+        const pptxFile = await invoke<any>("import_pptx_with_libreoffice", { path: filePath });
         const groupId = crypto.randomUUID();
 
         const slides: MediaItem[] = pptxFile.slides.map((slide: any) => ({
@@ -1062,18 +1089,20 @@ export const useStore = create<Store>((set, get) => ({
 
   connectSpotify: async () => {
     // Spotify OAuth2 PKCE configuration (no client secret needed for PKCE)
-    const clientId = import.meta.env.VITE_SPOTIFY_CLIENT_ID || "";
+	    const clientId = resolveSpotifyClientId(import.meta.env.VITE_SPOTIFY_CLIENT_ID);
     const scopes = "playlist-read-private playlist-read-collaborative user-read-email user-library-read";
 
-    if (!clientId) {
-      throw new Error("Spotify Client ID nicht konfiguriert. Bitte VITE_SPOTIFY_CLIENT_ID in .env setzen.");
-    }
+	    if (!clientId) {
+	      set({ error: "Spotify Client ID nicht konfiguriert. Bitte VITE_SPOTIFY_CLIENT_ID in .env setzen.", isLoading: false });
+	      throw new Error("Spotify Client ID nicht konfiguriert. Bitte VITE_SPOTIFY_CLIENT_ID in .env setzen.");
+	    }
 
-    set({ isLoading: true, error: null });
-
-    // For PKCE flow, we generate a code verifier and challenge
-    const codeVerifier = generateRandomString(64);
-    const codeChallenge = await generateCodeChallenge(codeVerifier);
+	    set({ isLoading: true, error: null });
+	    try {
+	
+	    // For PKCE flow, we generate a code verifier and challenge
+	    const codeVerifier = generateRandomString(64);
+	    const codeChallenge = await generateCodeChallenge(codeVerifier);
 
     // Store verifier for later
     localStorage.setItem("spotify_code_verifier", codeVerifier);
@@ -1096,7 +1125,7 @@ export const useStore = create<Store>((set, get) => ({
         // Auto-exchange the code
         get().exchangeSpotifyCode(code).catch((err) => {
           console.error("Auto-exchange failed:", err);
-          set({ error: `Spotify Verbindung fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}` });
+          set({ error: `Spotify Verbindung fehlgeschlagen: ${formatUnknownError(err)}` });
         });
         
         // Cleanup
@@ -1122,14 +1151,23 @@ export const useStore = create<Store>((set, get) => ({
         isLoading: false,
         error: "Spotify Autorisierung im Browser geöffnet. Nach der Anmeldung wirst du automatisch verbunden.",
       });
-    } catch (err) {
-      console.error("Failed to start Spotify auth:", err);
-      set({
-        error: `Spotify Auth Error: ${err instanceof Error ? err.message : String(err)}`,
-        isLoading: false,
-      });
-    }
-  },
+	    } catch (err) {
+	      console.error("Failed to start Spotify auth:", err);
+	      set({
+	        error: `Spotify Verbindung fehlgeschlagen: ${formatUnknownError(err)}`,
+	        isLoading: false,
+	      });
+	      throw err;
+	    }
+	    } catch (err) {
+	      console.error("connectSpotify failed:", err);
+	      set({
+	        error: `Spotify Verbindung fehlgeschlagen: ${formatUnknownError(err)}`,
+	        isLoading: false,
+	      });
+	      throw err;
+	    }
+	  },
 
   disconnectSpotify: () => {
     spotifyAuth = {

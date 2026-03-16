@@ -11,6 +11,13 @@ pub struct SpotifyAuthResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LibreOfficeStatus {
+    pub installed: bool,
+    pub path: Option<String>,
+    pub version: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Monitor {
     pub name: String,
     pub width: u32,
@@ -41,6 +48,185 @@ fn cleanup_pptx_temp_files() {
     if temp_dir.exists() {
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
+}
+
+/// Get LibreOffice installation status
+fn find_libreoffice() -> Option<PathBuf> {
+    // Check common installation paths
+    let paths = [
+        // Windows
+        PathBuf::from("C:\\Program Files\\LibreOffice\\program\\soffice.exe"),
+        PathBuf::from("C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe"),
+        // macOS
+        PathBuf::from("/Applications/LibreOffice.app/Contents/MacOS/soffice"),
+        // Linux
+        PathBuf::from("/usr/bin/soffice"),
+        PathBuf::from("/usr/bin/libreoffice"),
+        PathBuf::from("/snap/bin/libreoffice"),
+    ];
+
+    for path in &paths {
+        if path.exists() {
+            return Some(path.clone());
+        }
+    }
+
+    // Try PATH on Linux/macOS
+    if let Ok(output) = std::process::Command::new("which")
+        .arg("soffice")
+        .output()
+    {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Some(PathBuf::from(path));
+            }
+        }
+    }
+
+    None
+}
+
+#[tauri::command]
+fn check_libreoffice_installed() -> LibreOfficeStatus {
+    if let Some(path) = find_libreoffice() {
+        // Try to get version (without showing console window on Windows)
+        let version = {
+            let mut cmd = std::process::Command::new(&path);
+            cmd.arg("--version");
+            
+            // Hide console window on Windows
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                const CREATE_NO_WINDOW: u32 = 0x08000000;
+                cmd.creation_flags(CREATE_NO_WINDOW);
+            }
+            
+            cmd.output()
+                .ok()
+                .and_then(|output| {
+                    String::from_utf8(output.stdout)
+                        .ok()
+                        .map(|v| v.trim().to_string())
+                })
+        };
+
+        LibreOfficeStatus {
+            installed: true,
+            path: Some(path.to_string_lossy().to_string()),
+            version,
+        }
+    } else {
+        LibreOfficeStatus {
+            installed: false,
+            path: None,
+            version: None,
+        }
+    }
+}
+
+#[tauri::command]
+fn get_libreoffice_download_url() -> String {
+    // Return the official download URL
+    String::from("https://www.libreoffice.org/download/download/")
+}
+
+#[tauri::command]
+fn import_pptx_with_libreoffice(
+    _app: tauri::AppHandle,
+    path: String,
+) -> Result<PptxFile, String> {
+    use std::process::Command;
+
+    // Check if LibreOffice is installed
+    let libreoffice_path = find_libreoffice()
+        .ok_or_else(|| "LibreOffice ist nicht installiert. Bitte installieren Sie LibreOffice, um PowerPoint-Dateien zu importieren.".to_string())?;
+
+    // Create output directory for slide images
+    let out_dir = {
+        let millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| format!("Failed to get time: {}", e))?
+            .as_millis();
+        let pid = std::process::id();
+        let mut d = std::env::temp_dir();
+        d.push("openstage");
+        d.push("pptx");
+        d.push(format!("{}-{}", millis, pid));
+        std::fs::create_dir_all(&d).map_err(|e| format!("Failed to create temp dir: {}", e))?;
+        d
+    };
+
+    // Convert PPTX to images using LibreOffice
+    // soffice --headless --convert-to png --outdir /tmp/slides presentation.pptx
+    let mut cmd = Command::new(&libreoffice_path);
+    cmd.args([
+        "--headless",
+        "--convert-to", "png",
+        "--outdir", out_dir.to_str().ok_or("Invalid output directory")?,
+        &path,
+    ]);
+    
+    // Hide console window on Windows
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    
+    let output = cmd.output()
+        .map_err(|e| format!("Failed to run LibreOffice: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("LibreOffice conversion failed: {}", stderr));
+    }
+
+    // Find all generated PNG files
+    let mut slide_images: Vec<PathBuf> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&out_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map_or(false, |ext| ext == "png") {
+                slide_images.push(path);
+            }
+        }
+    }
+
+    // Sort by filename
+    slide_images.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+
+    // Get presentation name
+    let file_name = path
+        .split('\\')
+        .last()
+        .or_else(|| path.split('/').last())
+        .unwrap_or("Presentation")
+        .to_string();
+
+    // Create slide objects
+    let slides: Vec<PptxSlide> = slide_images
+        .iter()
+        .enumerate()
+        .map(|(i, image_path)| PptxSlide {
+            slide_number: (i + 1) as u32,
+            name: format!("Folie {}", i + 1),
+            image_path: image_path.to_string_lossy().to_string(),
+        })
+        .collect();
+
+    if slides.is_empty() {
+        return Err("Keine Folien konnten extrahiert werden. Die Datei könnte beschädigt sein oder ein unsupported Format haben.".to_string());
+    }
+
+    // Note: Temp directory will be cleaned up on next app startup by cleanup_pptx_temp_files()
+
+    Ok(PptxFile {
+        name: file_name,
+        slides,
+    })
 }
 
 #[tauri::command]
@@ -364,6 +550,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_monitors,
             import_pptx,
+            import_pptx_with_libreoffice,
+            check_libreoffice_installed,
+            get_libreoffice_download_url,
             start_spotify_auth_server
         ])
         .run(tauri::generate_context!())

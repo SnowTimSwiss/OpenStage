@@ -43,7 +43,13 @@
       "wix": null,
       "nsis": {
         "installMode": "currentUser"
-      }
+      },
+      "allowDowngrades": true
+    }
+  },
+  "plugins": {
+    "shell": {
+      "open": true
     }
   }
 }

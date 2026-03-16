@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useStore } from "../../store/useStore";
+import { resolveSpotifyClientId, setStoredSpotifyClientId } from "../../lib/spotify";
 import type { MusicItem, Playlist } from "../../types";
 
 export default function MusicTab() {
@@ -24,18 +25,23 @@ export default function MusicTab() {
   const reorderMusic = useStore((s) => s.reorderMusic);
   const createPlaylist = useStore((s) => s.createPlaylist);
   const setActivePlaylist = useStore((s) => s.setActivePlaylist);
-  const addTrackToPlaylist = useStore((s) => s.addTrackToPlaylist);
-  const connectSpotify = useStore((s) => s.connectSpotify);
-  const importSpotifyPlaylist = useStore((s) => s.importSpotifyPlaylist);
+	  const addTrackToPlaylist = useStore((s) => s.addTrackToPlaylist);
+	  const connectSpotify = useStore((s) => s.connectSpotify);
+	  const setError = useStore((s) => s.setError);
+	  const importSpotifyPlaylist = useStore((s) => s.importSpotifyPlaylist);
 
-  const [showCreatePlaylist, setShowCreatePlaylist] = useState(false);
-  const [newPlaylistName, setNewPlaylistName] = useState("");
-  const [showSpotifyModal, setShowSpotifyModal] = useState(false);
-  const [spotifyPlaylistUri, setSpotifyPlaylistUri] = useState("");
-
-  const current = music[musicIndex];
-  const dragIndex = useStore((s) => (s as any).dragIndex ?? -1);
-  const setDragIndex = (i: number) => (useStore as any).setState({ dragIndex: i });
+	  const [showCreatePlaylist, setShowCreatePlaylist] = useState(false);
+	  const [newPlaylistName, setNewPlaylistName] = useState("");
+	  const [showSpotifyModal, setShowSpotifyModal] = useState(false);
+	  const [spotifyClientIdInput, setSpotifyClientIdInput] = useState(() =>
+	    resolveSpotifyClientId(import.meta.env.VITE_SPOTIFY_CLIENT_ID)
+	  );
+	  const [spotifyPlaylistUri, setSpotifyPlaylistUri] = useState("");
+	
+	  const current = music[musicIndex];
+	  const spotifyRedirectUri = `http://127.0.0.1:${Number(import.meta.env.VITE_SPOTIFY_AUTH_PORT) || 8080}/callback`;
+	  const dragIndex = useStore((s) => (s as any).dragIndex ?? -1);
+	  const setDragIndex = (i: number) => (useStore as any).setState({ dragIndex: i });
 
   function handleDragStart(e: React.DragEvent, index: number) {
     e.dataTransfer.setData("text/plain", index.toString());
@@ -79,13 +85,22 @@ export default function MusicTab() {
     setActivePlaylist(playlistId);
   }
 
-  async function handleConnectSpotify() {
-    try {
-      await connectSpotify();
-    } catch (err) {
-      console.error(err);
-    }
-  }
+	  async function handleConnectSpotify() {
+	    const resolvedClientId = spotifyClientIdInput.trim() || resolveSpotifyClientId(import.meta.env.VITE_SPOTIFY_CLIENT_ID);
+	    if (!resolvedClientId) {
+	      setError("Spotify Client ID fehlt. Bitte in Spotify → Developer Dashboard eine App anlegen und die Client ID hier eintragen.");
+	      setShowSpotifyModal(true);
+	      return;
+	    }
+	    setStoredSpotifyClientId(resolvedClientId);
+	    setError("Öffne Spotify Login im Browser…");
+	    try {
+	      await connectSpotify();
+	    } catch (err) {
+	      console.error(err);
+	      setError(`Spotify Verbindung fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`);
+	    }
+	  }
 
   async function handleImportSpotifyPlaylist() {
     if (!spotifyPlaylistUri.trim()) return;
@@ -130,13 +145,18 @@ export default function MusicTab() {
             <button
               onClick={() => setShowSpotifyModal(true)}
               className="text-xs px-3 py-1.5 rounded font-medium flex items-center gap-1"
-              style={{ background: "#1DB954", color: "white" }}
+	                  style={{
+	                    background: "#1DB954",
+	                    color: "white",
+	                    opacity: (!spotifyClientIdInput.trim() && !resolveSpotifyClientId(import.meta.env.VITE_SPOTIFY_CLIENT_ID)) ? 0.6 : 1,
+	                  }}
             >
               🟢 Spotify
             </button>
           ) : (
             <button
-              onClick={handleConnectSpotify}
+	                  onClick={handleConnectSpotify}
+	                  disabled={!spotifyClientIdInput.trim() && !resolveSpotifyClientId(import.meta.env.VITE_SPOTIFY_CLIENT_ID)}
               className="text-xs px-3 py-1.5 rounded font-medium flex items-center gap-1"
               style={{ background: "#1DB954", color: "white" }}
             >
@@ -420,12 +440,45 @@ export default function MusicTab() {
                   Trennen
                 </button>
               </>
-            ) : (
-              <>
-                <p className="text-sm text-gray-300 mb-4">
-                  Verbinde dich mit Spotify, um deine Playlists zu importieren.
-                  <br /><br />
-                  <strong className="text-white">Ablauf:</strong>
+	            ) : (
+	              <>
+	                <div className="mb-4">
+	                  <label className="text-xs text-gray-400 block mb-1">Spotify Client ID</label>
+	                  <input
+	                    type="text"
+	                    value={spotifyClientIdInput}
+	                    onChange={(e) => setSpotifyClientIdInput(e.target.value)}
+	                    placeholder="z.B. 0123456789abcdef0123456789abcdef"
+	                    className="w-full px-3 py-2 rounded bg-[#0a0a0a] text-white border border-[#333] text-sm"
+	                  />
+	                  <p className="text-[11px] text-gray-500 mt-2">
+	                    Du findest die Client ID im Spotify Developer Dashboard (App → Settings).
+	                  </p>
+	                </div>
+
+	                <div className="mb-4">
+	                  <label className="text-xs text-gray-400 block mb-1">Redirect URI (im Spotify Dashboard eintragen)</label>
+	                  <div className="flex gap-2">
+	                    <input
+	                      type="text"
+	                      value={spotifyRedirectUri}
+	                      readOnly
+	                      className="flex-1 px-3 py-2 rounded bg-[#0a0a0a] text-gray-300 border border-[#333] text-sm"
+	                    />
+	                    <button
+	                      onClick={() => navigator.clipboard?.writeText(spotifyRedirectUri).catch(() => {})}
+	                      className="px-3 py-2 rounded text-xs font-medium"
+	                      style={{ background: "#252525", color: "#aaa" }}
+	                    >
+	                      Kopieren
+	                    </button>
+	                  </div>
+	                </div>
+
+	                <p className="text-sm text-gray-300 mb-4">
+	                  Verbinde dich mit Spotify, um deine Playlists zu importieren.
+	                  <br /><br />
+	                  <strong className="text-white">Ablauf:</strong>
                   <ol className="list-decimal list-inside mt-2 text-gray-400 text-xs">
                     <li>"Verbinden" klicken</li>
                     <li>In Spotify im Browser anmelden</li>
