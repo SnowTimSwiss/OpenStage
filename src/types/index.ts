@@ -13,12 +13,22 @@ export interface Song {
   slides: SongSlide[];
 }
 
+export type MediaType = "image" | "video";
+
 export interface MediaItem {
   id: string;
   name: string;
   path: string;
-  src: string; // convertFileSrc result
-  type: "image" | "video";
+  src: string; // convertFileSrc or base64 result
+  type: MediaType;
+  groupId?: string; // For PPTX groups
+  duration?: number; // For videos (seconds)
+}
+
+export interface PptxGroup {
+  id: string;
+  name: string;
+  slides: MediaItem[];
 }
 
 export interface MusicItem {
@@ -57,9 +67,8 @@ export interface OutputPayload {
 // ── Store ────────────────────────────────────────────────────────────────────
 
 export type TabId =
-  | "slides"
+  | "media"
   | "songs"
   | "countdown"
-  | "video"
   | "music"
   | "display";

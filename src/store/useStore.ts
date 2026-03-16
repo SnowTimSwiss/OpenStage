@@ -5,7 +5,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { sendToOutput, openOutputWindow } from "../lib/events";
 import type {
   Song, SongSlide, MediaItem, MusicItem,
-  Monitor, TabId, OutputMode,
+  Monitor, TabId, OutputMode, PptxGroup,
 } from "../types";
 
 const STORAGE_KEY = "openstage-settings-v1";
@@ -38,6 +38,14 @@ interface Store {
   goLiveSlide: (id: string) => void;
   reorderSlides: (fromIndex: number, toIndex: number) => void;
   removeSlide: (id: string) => void;
+
+  // ── PPTX Groups ────────────────────────────────────────────────────────
+  pptxGroups: PptxGroup[];
+  expandedGroupId: string | null;
+  loadPptx: () => Promise<void>;
+  toggleExpandGroup: (groupId: string) => void;
+  removeGroup: (groupId: string) => void;
+  goLiveSlideFromGroup: (groupId: string, slideIndex: number) => void;
 
   // ── Songs ──────────────────────────────────────────────────────────────
   songs: Song[];
@@ -95,7 +103,7 @@ interface Store {
 
 export const useStore = create<Store>((set, get) => ({
   // ── UI ──────────────────────────────────────────────────────────────────
-  activeTab: "slides",
+  activeTab: "media" as TabId,
   outputWindowReady: false,
   setActiveTab: (tab) => set({ activeTab: tab }),
 
@@ -169,6 +177,64 @@ export const useStore = create<Store>((set, get) => ({
 
   removeSlide: (id) =>
     set((s) => ({ slides: s.slides.filter((x) => x.id !== id) })),
+
+  // ── PPTX Groups ────────────────────────────────────────────────────────
+  pptxGroups: [],
+  expandedGroupId: null,
+
+  loadPptx: async () => {
+    const { setLoading, setError, clearError } = get();
+    try {
+      setLoading(true);
+      clearError();
+      const files = await openDialog({
+        multiple: true,
+        filters: [{ name: "PowerPoint", extensions: ["pptx"] }],
+      });
+      if (!files) return;
+      const arr = Array.isArray(files) ? files : [files];
+      
+      for (const file of arr) {
+        const filePath = file as string;
+        const pptxFile = await invoke<any>("import_pptx", { path: filePath });
+        const groupId = crypto.randomUUID();
+        
+        const slides: MediaItem[] = pptxFile.slides.map((slide: any) => ({
+          id: crypto.randomUUID(),
+          name: slide.name,
+          path: filePath,
+          src: `data:image/png;base64,${slide.image_data}`,
+          type: "image",
+          groupId,
+        }));
+        
+        set((s) => ({
+          pptxGroups: [...s.pptxGroups, { id: groupId, name: pptxFile.name, slides }],
+        }));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Fehler beim Laden der PowerPoint-Datei");
+    } finally {
+      setLoading(false);
+    }
+  },
+
+  toggleExpandGroup: (groupId) =>
+    set((s) => ({ expandedGroupId: s.expandedGroupId === groupId ? null : groupId })),
+
+  removeGroup: (groupId) =>
+    set((s) => ({
+      pptxGroups: s.pptxGroups.filter((g) => g.id !== groupId),
+      slides: s.slides.filter((x) => x.groupId !== groupId),
+    })),
+
+  goLiveSlideFromGroup: (groupId, slideIndex) => {
+    const group = get().pptxGroups.find((g) => g.id === groupId);
+    if (!group || !group.slides[slideIndex]) return;
+    const slide = group.slides[slideIndex];
+    set({ activeSlideId: slide.id, outputMode: "image", isBlackout: false });
+    sendToOutput({ mode: "image", image: { src: slide.src } });
+  },
 
   // ── Songs ──────────────────────────────────────────────────────────────
   songs: [],

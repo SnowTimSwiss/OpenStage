@@ -2,10 +2,9 @@ import { useEffect } from "react";
 import { useStore } from "../store/useStore";
 import Header from "./Header";
 import Sidebar from "./Sidebar";
-import SlidesTab from "./tabs/SlidesTab";
+import MediaTab from "./tabs/MediaTab";
 import SongsTab from "./tabs/SongsTab";
 import CountdownTab from "./tabs/CountdownTab";
-import VideoTab from "./tabs/VideoTab";
 import MusicTab from "./tabs/MusicTab";
 import DisplayTab from "./tabs/DisplayTab";
 
@@ -36,10 +35,9 @@ export default function OperatorApp() {
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
         <main className="flex-1 overflow-hidden" style={{ background: "#111111" }}>
-          {activeTab === "slides"    && <SlidesTab />}
+          {activeTab === "media"     && <MediaTab />}
           {activeTab === "songs"     && <SongsTab />}
           {activeTab === "countdown" && <CountdownTab />}
-          {activeTab === "video"     && <VideoTab />}
           {activeTab === "music"     && <MusicTab />}
           {activeTab === "display"   && <DisplayTab />}
         </main>
