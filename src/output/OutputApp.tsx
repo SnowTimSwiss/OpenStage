@@ -146,115 +146,128 @@ export default function OutputApp() {
   }
 
   // ── Countdown ─────────────────────────────────────────────────────────────
-	  if (mode === "countdown" && state.countdown !== undefined) {
-	    const { remaining, label, theme = "default" } = state.countdown;
-	    const urgent = remaining <= 10 && remaining > 0;
+  if (mode === "countdown" && state.countdown !== undefined) {
+    const { remaining, label, theme = "default" } = state.countdown;
+    const urgent = remaining <= 10 && remaining > 0;
 
-	    // Minimal = current (classic) look
-	    if (theme === "minimal") {
-	      return (
-	        <div
-	          className="w-screen h-screen bg-black flex flex-col items-center justify-center gap-4 transition-opacity duration-300"
-	          style={{ opacity: isTransitioning ? 0 : 1 }}
-	        >
-	          {label && (
-	            <p
-	              className="text-white/50 uppercase tracking-widest text-2xl"
-	              style={{ fontFamily: "'Sora', sans-serif" }}
-	            >
-	              {label}
-	            </p>
-	          )}
-	          <p
-	            className="font-mono leading-none"
-	            style={{
-	              fontSize: "clamp(6rem, 18vw, 18rem)",
-	              fontFamily: "'JetBrains Mono', monospace",
-	              fontWeight: 600,
-	              color: urgent ? "#ef4444" : "#ffffff",
-	              textShadow: urgent ? "0 0 40px #ef444480" : "none",
-	              transition: "color 0.3s, text-shadow 0.3s",
-	            }}
-	          >
-	            {formatTime(remaining)}
-	          </p>
-	        </div>
-	      );
-	    }
+    // Minimal = clean look
+    if (theme === "minimal") {
+      return (
+        <div
+          className="w-screen h-screen bg-black flex flex-col items-center justify-center gap-4 transition-opacity duration-300"
+          style={{ opacity: isTransitioning ? 0 : 1 }}
+        >
+          {label && (
+            <p
+              className="text-white/50 uppercase tracking-widest text-2xl"
+              style={{ fontFamily: "'Sora', sans-serif" }}
+            >
+              {label}
+            </p>
+          )}
+          <p
+            className="font-mono leading-none"
+            style={{
+              fontSize: "clamp(6rem, 18vw, 18rem)",
+              fontFamily: "'JetBrains Mono', monospace",
+              fontWeight: 600,
+              color: urgent ? "#ef4444" : "#ffffff",
+              textShadow: urgent ? "0 0 40px #ef444480" : "0 0 20px rgba(255,255,255,0.3)",
+              transition: "color 0.3s, text-shadow 0.3s",
+            }}
+          >
+            {formatTime(remaining)}
+          </p>
+        </div>
+      );
+    }
 
-	    if (theme === "default") {
-	      return (
-	        <div
-	          className="w-screen h-screen bg-black flex flex-col items-center justify-center gap-6 transition-opacity duration-300 relative overflow-hidden"
-	          style={{ opacity: isTransitioning ? 0 : 1 }}
-	        >
-	          <div className="countdown-bg-aurora" />
-	          {label && (
-	            <p
-	              className="text-white/55 uppercase tracking-widest text-2xl"
-	              style={{ fontFamily: "'Sora', sans-serif" }}
-	            >
-	              {label}
-	            </p>
-	          )}
-	          <p
-	            className="font-mono leading-none"
-	            style={{
-	              fontSize: "clamp(6rem, 18vw, 18rem)",
-	              fontFamily: "'JetBrains Mono', monospace",
-	              fontWeight: 700,
-	              color: urgent ? "#ef4444" : "#ffffff",
-	              textShadow: urgent ? "0 0 60px #ef444480" : "0 0 40px #f9731633",
-	              transition: "color 0.3s, text-shadow 0.3s",
-	            }}
-	          >
-	            {formatTime(remaining)}
-	          </p>
-	        </div>
-	      );
-	    }
+    // Aurora = colorful gradient background
+    if (theme === "default") {
+      return (
+        <div
+          className="w-screen h-screen bg-black flex flex-col items-center justify-center gap-6 transition-opacity duration-300 relative overflow-hidden"
+          style={{ opacity: isTransitioning ? 0 : 1 }}
+        >
+          <div className="countdown-bg-aurora" />
+          {label && (
+            <p
+              className="text-white/60 uppercase tracking-widest text-2xl relative z-10"
+              style={{ fontFamily: "'Sora', sans-serif" }}
+            >
+              {label}
+            </p>
+          )}
+          <p
+            className="font-mono leading-none relative z-10"
+            style={{
+              fontSize: "clamp(6rem, 18vw, 18rem)",
+              fontFamily: "'JetBrains Mono', monospace",
+              fontWeight: 700,
+              color: urgent ? "#ef4444" : "#ffffff",
+              textShadow: urgent 
+                ? "0 0 60px #ef444480, 0 0 100px #ef444440" 
+                : "0 0 40px #f9731650, 0 0 80px #f9731630",
+              transition: "color 0.3s, text-shadow 0.3s",
+            }}
+          >
+            {formatTime(remaining)}
+          </p>
+        </div>
+      );
+    }
 
-	    if (theme === "bold") {
-	      return (
-	        <div
-	          className="w-screen h-screen bg-black flex flex-col items-center justify-center transition-opacity duration-300 relative overflow-hidden"
-	          style={{ opacity: isTransitioning ? 0 : 1 }}
-	        >
-	          <div className="countdown-bg-pulse" />
-	          <div className="absolute top-0 left-0 right-0 h-2" style={{ background: urgent ? "#ef4444" : "#f97316" }} />
-	          {label && (
-	            <p
-	              className="text-white/60 uppercase tracking-[0.2em] text-3xl mb-6"
-	              style={{ fontFamily: "'Sora', sans-serif" }}
-	            >
-	              {label}
-	            </p>
-	          )}
-	          <p
-	            className="font-mono leading-none"
-	            style={{
-	              fontSize: "clamp(6rem, 18vw, 18rem)",
-	              fontFamily: "'JetBrains Mono', monospace",
-	              fontWeight: 800,
-	              color: urgent ? "#ef4444" : "#ffffff",
-	              textShadow: urgent ? "0 0 60px #ef444480" : "0 0 40px #f9731640",
-	            }}
-	          >
-	            {formatTime(remaining)}
-	          </p>
-	        </div>
-	      );
-	    }
+    // Bold = pulse effect with grid
+    if (theme === "bold") {
+      return (
+        <div
+          className="w-screen h-screen bg-black flex flex-col items-center justify-center transition-opacity duration-300 relative overflow-hidden"
+          style={{ opacity: isTransitioning ? 0 : 1 }}
+        >
+          <div className="countdown-bg-pulse" />
+          <div 
+            className="absolute top-0 left-0 right-0 h-1.5" 
+            style={{ 
+              background: urgent ? "#ef4444" : "#f97316",
+              boxShadow: `0 0 30px ${urgent ? "#ef4444" : "#f97316"}`,
+            }} 
+          />
+          {label && (
+            <p
+              className="text-white/70 uppercase tracking-[0.25em] text-3xl mb-6 relative z-10"
+              style={{ fontFamily: "'Sora', sans-serif" }}
+            >
+              {label}
+            </p>
+          )}
+          <p
+            className="font-mono leading-none relative z-10"
+            style={{
+              fontSize: "clamp(6rem, 18vw, 18rem)",
+              fontFamily: "'JetBrains Mono', monospace",
+              fontWeight: 800,
+              color: urgent ? "#ef4444" : "#ffffff",
+              textShadow: urgent 
+                ? "0 0 60px #ef4444, 0 0 120px #ef444460" 
+                : "0 0 40px #f9731660, 0 0 80px #f9731640",
+              transition: "color 0.3s, text-shadow 0.3s",
+            }}
+          >
+            {formatTime(remaining)}
+          </p>
+        </div>
+      );
+    }
 
-	    // Fallback to minimal
-	    return (
-	      <div className="w-screen h-screen bg-black flex items-center justify-center">
-	        <p className="font-mono text-white" style={{ fontSize: "clamp(6rem, 18vw, 18rem)" }}>
-	          {formatTime(remaining)}
-	        </p>
-	      </div>
-	    );
-	  }
+    // Fallback to minimal
+    return (
+      <div className="w-screen h-screen bg-black flex items-center justify-center">
+        <p className="font-mono text-white" style={{ fontSize: "clamp(6rem, 18vw, 18rem)" }}>
+          {formatTime(remaining)}
+        </p>
+      </div>
+    );
+  }
 
   return <div className="w-screen h-screen bg-black" />;
 }
