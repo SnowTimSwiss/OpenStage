@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useStore } from "../../store/useStore";
 import type { Song, SongSlide } from "../../types";
 
@@ -18,6 +18,18 @@ export default function SongsTab() {
 
   const [view, setView] = useState<View>("list");
   const [editingSong, setEditingSong] = useState<Song | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const filteredSongs = useMemo(() => {
+    if (!searchQuery.trim()) return songs;
+    const query = searchQuery.toLowerCase();
+    return songs.filter(
+      (song) =>
+        song.title.toLowerCase().includes(query) ||
+        (song.artist && song.artist.toLowerCase().includes(query)) ||
+        song.slides.some((slide) => slide.text.toLowerCase().includes(query) || (slide.label && slide.label.toLowerCase().includes(query)))
+    );
+  }, [songs, searchQuery]);
 
   const activeSong = songs.find((s) => s.id === activeSongId) ?? null;
 
@@ -98,6 +110,14 @@ export default function SongsTab() {
                   </div>
                 )}
                 <div className="text-xs leading-relaxed whitespace-pre-line">{slide.text || <span style={{ color: "#444" }}>(leer)</span>}</div>
+                {slide.notes && (
+                  <div className="mt-2 pt-2 border-t" style={{ borderColor: "#222" }}>
+                    <div className="text-[9px] uppercase tracking-wider mb-0.5" style={{ color: "#555" }}>
+                      📝 Notizen
+                    </div>
+                    <div className="text-[10px] leading-relaxed" style={{ color: "#666" }}>{slide.notes}</div>
+                  </div>
+                )}
                 {isActive && (
                   <div className="mt-2 text-[10px] font-bold" style={{ color: "#f97316" }}>● LIVE</div>
                 )}
@@ -130,29 +150,49 @@ export default function SongsTab() {
   // ── SONG LIST ─────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: "#252525" }}>
-        <h2 className="text-sm font-semibold text-white">Lieder</h2>
-        <button
-          onClick={startNew}
-          className="text-xs px-3 py-1.5 rounded font-medium"
-          style={{ background: "#f97316", color: "white" }}
-        >
-          + Neues Lied
-        </button>
+      <div className="flex flex-col gap-3 px-4 py-3 border-b" style={{ borderColor: "#252525" }}>
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-white">Lieder</h2>
+          <button
+            onClick={startNew}
+            className="text-xs px-3 py-1.5 rounded font-medium"
+            style={{ background: "#f97316", color: "white" }}
+          >
+            + Neues Lied
+          </button>
+        </div>
+        {/* Search */}
+        <input
+          type="text"
+          placeholder="Suche (Titel, Artist, Text)..."
+          className="text-sm px-3 py-2 rounded outline-none"
+          style={{ background: "#141414", border: "1px solid #252525", color: "#ddd" }}
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+        />
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
-        {songs.length === 0 ? (
+        {filteredSongs.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
             <span className="text-5xl">🎵</span>
-            <p className="text-white font-medium">Keine Lieder</p>
-            <p className="text-sm" style={{ color: "#555" }}>Füge dein erstes Lied hinzu</p>
-            <button onClick={startNew} className="text-sm px-4 py-2 rounded" style={{ background: "#f97316", color: "white" }}>
-              Lied erstellen
-            </button>
+            {songs.length === 0 ? (
+              <>
+                <p className="text-white font-medium">Keine Lieder</p>
+                <p className="text-sm" style={{ color: "#555" }}>Füge dein erstes Lied hinzu</p>
+                <button onClick={startNew} className="text-sm px-4 py-2 rounded" style={{ background: "#f97316", color: "white" }}>
+                  Lied erstellen
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-white font-medium">Keine Treffer</p>
+                <p className="text-sm" style={{ color: "#555" }}>Versuche eine andere Suche</p>
+              </>
+            )}
           </div>
         ) : (
-          songs.map((song) => {
+          filteredSongs.map((song) => {
             const isSelected = song.id === activeSongId;
             return (
               <div
@@ -288,6 +328,20 @@ function SongEditor({ song, onChange, onSave, onCancel }: {
                   onChange={(e) => updateSlide(slide.id, "text", e.target.value)}
                   rows={3}
                 />
+                {/* Notes (operator only) */}
+                <div className="mt-2 pt-2 border-t" style={{ borderColor: "#222" }}>
+                  <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: "#444" }}>
+                    📝 Notizen (nur Operator)
+                  </div>
+                  <textarea
+                    className="w-full text-xs rounded p-2 outline-none resize-none"
+                    style={{ background: "#0f0f0f", border: "1px solid #2a2a2a", color: "#888", minHeight: "50px" }}
+                    placeholder="Private Notizen für diese Folie..."
+                    value={slide.notes ?? ""}
+                    onChange={(e) => updateSlide(slide.id, "notes", e.target.value)}
+                    rows={2}
+                  />
+                </div>
               </div>
             ))}
           </div>

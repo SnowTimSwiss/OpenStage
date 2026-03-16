@@ -27,7 +27,7 @@ function alternateAssetUrl(src: string): string | null {
 
 export default function MediaTab() {
 	  const [filter, setFilter] = useState<FilterType>("all");
-	  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+	  const [_viewMode, _setViewMode] = useState<"grid" | "list">("grid");
 	  const [pptxPresentation, setPptxPresentation] = useState<{ groupId: string; index: number } | null>(null);
 
   // Slides (images)
@@ -159,7 +159,7 @@ export default function MediaTab() {
     setDragIndex(index);
   }
 
-  function handleDragOver(e: React.DragEvent, index: number) {
+  function handleDragOver(e: React.DragEvent, _index: number) {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
   }
@@ -178,9 +178,9 @@ export default function MediaTab() {
   }
 
   // Filter items
-  const filteredSlides = slides.filter((s) => filter === "all" || filter === "image" ? true : false);
-  const filteredVideos = videos.filter((v) => filter === "all" || filter === "video" ? true : false);
-  const filteredGroups = pptxGroups.filter((g) => filter === "all" || filter === "pptx" ? true : false);
+  // filtered slides for future use
+
+
 
   const totalImages = slides.length + pptxGroups.reduce((acc, g) => acc + g.slides.length, 0);
   const totalVideos = videos.length;

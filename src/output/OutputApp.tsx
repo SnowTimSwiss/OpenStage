@@ -23,10 +23,10 @@ export default function OutputApp() {
       const timer = setTimeout(() => {
         setIsTransitioning(false);
         setPreviousMode(state.mode);
-      }, 300);
+      }, 500);
       return () => clearTimeout(timer);
     }
-  }, [state.mode, previousMode]);
+  }, [state.mode, previousMode, state.image, state.song, state.countdown]);
 
   useEffect(() => {
     const unlisten = listen<OutputPayload>(OUTPUT_EVENT, (e) => {

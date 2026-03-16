@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::path::PathBuf;
+use tauri::Listener;
 use zip::read::ZipArchive;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -25,6 +26,17 @@ pub struct PptxFile {
     pub slides: Vec<PptxSlide>,
 }
 
+/// Clean up PPTX temp files from previous sessions
+fn cleanup_pptx_temp_files() {
+    let mut temp_dir = std::env::temp_dir();
+    temp_dir.push("openstage");
+    temp_dir.push("pptx");
+
+    if temp_dir.exists() {
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+}
+
 #[tauri::command]
 fn get_monitors(app: tauri::AppHandle) -> Result<Vec<Monitor>, String> {
     match app.available_monitors() {
@@ -46,17 +58,17 @@ fn get_monitors(app: tauri::AppHandle) -> Result<Vec<Monitor>, String> {
 fn import_pptx(path: String) -> Result<PptxFile, String> {
     let file = std::fs::File::open(&path)
         .map_err(|e| format!("Failed to open file: {}", e))?;
-    
+
     let mut archive = ZipArchive::new(file)
         .map_err(|e| format!("Failed to read PPTX: {}", e))?;
-    
+
     let file_name = path
         .split('\\')
         .last()
         .or_else(|| path.split('/').last())
         .unwrap_or("Presentation")
         .to_string();
-    
+
     let mut slides: Vec<PptxSlide> = Vec::new();
 
     let out_dir = {
@@ -72,7 +84,7 @@ fn import_pptx(path: String) -> Result<PptxFile, String> {
         std::fs::create_dir_all(&d).map_err(|e| format!("Failed to create temp dir: {}", e))?;
         d
     };
-    
+
     // Get slide count from presentation.xml
     let slide_count = archive
         .by_name("ppt/presentation.xml")
@@ -84,7 +96,7 @@ fn import_pptx(path: String) -> Result<PptxFile, String> {
             Some(content.matches("<p:slideId").count())
         })
         .unwrap_or(0);
-    
+
     // Extract slide images using slide relationship files (more reliable than guessing).
     for slide_num in 1..=(slide_count as u32) {
         let rels_path = format!("ppt/slides/_rels/slide{}.xml.rels", slide_num);
@@ -156,7 +168,7 @@ fn import_pptx(path: String) -> Result<PptxFile, String> {
             image_path: out_path.to_string_lossy().to_string(),
         });
     }
-    
+
     // If no slide relations were found, extract all images from ppt/media/ as a fallback.
     if slides.is_empty() {
         let mut media_entries: Vec<String> = Vec::new();
@@ -197,7 +209,7 @@ fn import_pptx(path: String) -> Result<PptxFile, String> {
             });
         }
     }
-    
+
     Ok(PptxFile {
         name: file_name,
         slides,
@@ -205,13 +217,18 @@ fn import_pptx(path: String) -> Result<PptxFile, String> {
 }
 
 pub fn run() {
+    // Clean up temp files from previous sessions on startup
+    cleanup_pptx_temp_files();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
-            // Create the output window on startup so it's ready
-            // (It can also be opened on demand via JS)
-            let _ = app; // suppress unused warning
+            // Clean up temp files on exit
+            let app_handle = app.handle().clone();
+            app_handle.listen("tauri://before-close", move |_| {
+                cleanup_pptx_temp_files();
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![get_monitors, import_pptx])

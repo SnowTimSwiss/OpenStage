@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useStore } from "../store/useStore";
 
 const MODE_LABELS: Record<string, string> = {
@@ -9,6 +10,10 @@ const MODE_LABELS: Record<string, string> = {
   countdown: "Countdown",
 };
 
+function formatTime(date: Date): string {
+  return date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+}
+
 export default function Header() {
   const isBlackout = useStore((s) => s.isBlackout);
   const outputMode = useStore((s) => s.outputMode);
@@ -16,6 +21,14 @@ export default function Header() {
   const clearOutput = useStore((s) => s.clearOutput);
   const error = useStore((s) => s.error);
   const clearError = useStore((s) => s.clearError);
+  const [currentTime, setCurrentTime] = useState(formatTime(new Date()));
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(formatTime(new Date()));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   return (
     <>
@@ -45,6 +58,15 @@ export default function Header() {
 
         {/* Live status */}
         <div className="flex items-center gap-3">
+          {/* Clock */}
+          <div
+            className="flex items-center gap-2 px-3 py-1.5 rounded font-mono"
+            style={{ background: "#171717", border: "1px solid #252525", color: "#aaa" }}
+          >
+            <span className="text-xs">🕐</span>
+            <span className="text-sm font-medium">{currentTime}</span>
+          </div>
+
           <div
             className="flex items-center gap-2 px-3 py-1.5 rounded"
             style={{ background: "#171717", border: "1px solid #252525" }}

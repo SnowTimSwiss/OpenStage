@@ -4,6 +4,7 @@ export interface SongSlide {
   id: string;
   text: string;
   label?: string; // e.g. "Strophe 1", "Refrain"
+  notes?: string; // Private notes for operator (not shown on output)
 }
 
 export interface Song {
@@ -23,6 +24,7 @@ export interface MediaItem {
   type: MediaType;
   groupId?: string; // For PPTX groups
   duration?: number; // For videos (seconds)
+  notes?: string; // Private notes for operator
 }
 
 export interface PptxGroup {
@@ -61,9 +63,9 @@ export type CountdownTheme = "default" | "minimal" | "bold";
 export interface OutputPayload {
   mode: OutputMode;
   image?: { src: string };
-  video?: { src: string; playing?: boolean };
+  video?: { src: string; playing?: boolean; startTime?: number; endTime?: number };
   song?: { text: string; title: string; index: number; total: number };
-  countdown?: { remaining: number; label: string; running: boolean; theme?: CountdownTheme };
+  countdown?: { remaining: number; label: string; running: boolean; theme?: CountdownTheme; targetTime?: string | null };
 }
 
 // ── Store ────────────────────────────────────────────────────────────────────
@@ -74,3 +76,5 @@ export type TabId =
   | "countdown"
   | "music"
   | "display";
+
+export type TransitionType = "none" | "fade" | "slide" | "zoom";

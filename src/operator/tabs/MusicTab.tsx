@@ -27,7 +27,7 @@ export default function MusicTab() {
     setDragIndex(index);
   }
 
-  function handleDragOver(e: React.DragEvent, index: number) {
+  function handleDragOver(e: React.DragEvent, _index: number) {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
   }

@@ -3,16 +3,18 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { sendToOutput, openOutputWindow, assignOutputToMonitor, closeOutputWindow as closeOutputFn } from "../lib/events";
+import { secondsUntilTargetTime } from "../lib/formatTime";
 import type {
-	  Song, SongSlide, MediaItem, MusicItem,
-	  Monitor, TabId, OutputMode, PptxGroup, CountdownTheme,
-	} from "../types";
+  Song, MediaItem, MusicItem,
+  Monitor, TabId, OutputMode, PptxGroup, CountdownTheme,
+} from "../types";
 
 const STORAGE_KEY = "openstage-settings-v1";
 
 let countdownInterval: ReturnType<typeof setInterval> | null = null;
 let musicAudio: HTMLAudioElement | null = null;
 let musicAudioSrc: string | null = null;
+let backgroundMusicAudio: HTMLAudioElement | null = null;
 
 function formatUnknownError(err: unknown): string {
   if (err instanceof Error) return `${err.name}: ${err.message}`;
@@ -40,11 +42,20 @@ function isOutputWebview(): boolean {
 
 function ensureMusicAudio(): HTMLAudioElement | null {
   if (typeof window === "undefined") return null;
-  if (isOutputWebview()) return null; // prevent double audio in output window
+  if (isOutputWebview()) return null;
   if (musicAudio) return musicAudio;
   musicAudio = new Audio();
   musicAudio.preload = "metadata";
   return musicAudio;
+}
+
+function ensureBackgroundMusicAudio(): HTMLAudioElement | null {
+  if (typeof window === "undefined") return null;
+  if (isOutputWebview()) return null;
+  if (backgroundMusicAudio) return backgroundMusicAudio;
+  backgroundMusicAudio = new Audio();
+  backgroundMusicAudio.preload = "metadata";
+  return backgroundMusicAudio;
 }
 
 interface Store {
@@ -67,13 +78,13 @@ interface Store {
   clearOutput: () => void;
 
   // ── Slides (images) ────────────────────────────────────────────────────
-	  slides: MediaItem[];
-	  activeSlideId: string | null;
-	  loadMedia: () => Promise<void>;
-	  loadSlides: () => Promise<void>;
-	  goLiveSlide: (id: string) => void;
-	  reorderSlides: (fromIndex: number, toIndex: number) => void;
-	  removeSlide: (id: string) => void;
+  slides: MediaItem[];
+  activeSlideId: string | null;
+  loadMedia: () => Promise<void>;
+  loadSlides: () => Promise<void>;
+  goLiveSlide: (id: string) => void;
+  reorderSlides: (fromIndex: number, toIndex: number) => void;
+  removeSlide: (id: string) => void;
 
   // ── PPTX Groups ────────────────────────────────────────────────────────
   pptxGroups: PptxGroup[];
@@ -96,51 +107,57 @@ interface Store {
   prevSongSlide: () => void;
 
   // ── Countdown ──────────────────────────────────────────────────────────
-	  countdownDuration: number; // seconds
-	  countdownRemaining: number;
-	  countdownLabel: string;
-	  countdownRunning: boolean;
-	  countdownLive: boolean;
-	  countdownTargetTime: string | null; // "HH:MM" (local time)
-	  countdownTheme: CountdownTheme;
-	  setCountdownDuration: (s: number) => void;
-	  setCountdownLabel: (l: string) => void;
-	  setCountdownTargetTime: (t: string | null) => void;
-	  applyCountdownTargetTime: () => void;
-	  setCountdownTheme: (theme: CountdownTheme) => void;
-	  startCountdown: () => void;
-	  stopCountdown: () => void;
-	  resetCountdown: () => void;
-	  setCountdownLive: (live: boolean) => void;
+  countdownRemaining: number;
+  countdownLabel: string;
+  countdownRunning: boolean;
+  countdownLive: boolean;
+  countdownTargetTime: string | null;
+  countdownTheme: CountdownTheme;
+  countdownBackgroundMusicId: string | null;
+  setCountdownLabel: (l: string) => void;
+  setCountdownTargetTime: (t: string | null) => void;
+  applyCountdownTargetTime: () => void;
+  setCountdownTheme: (theme: CountdownTheme) => void;
+  setCountdownBackgroundMusic: (id: string | null) => void;
+  startCountdown: () => void;
+  stopCountdown: () => void;
+  resetCountdown: () => void;
+  setCountdownLive: (live: boolean) => void;
 
   // ── Video ──────────────────────────────────────────────────────────────
   videos: MediaItem[];
   activeVideoId: string | null;
+  videoStartTime: number | null; // seconds
+  videoEndTime: number | null; // seconds
   loadVideos: () => Promise<void>;
   goLiveVideo: (id: string) => void;
   removeVideo: (id: string) => void;
+  setVideoStartTime: (s: number | null) => void;
+  setVideoEndTime: (s: number | null) => void;
 
   // ── Music ──────────────────────────────────────────────────────────────
-	  music: MusicItem[];
-	  musicIndex: number;
-	  musicPlaying: boolean;
-	  musicVolume: number; // 0..1
-	  musicCurrentTime: number; // seconds
-	  musicDuration: number; // seconds
-	  loadMusic: () => Promise<void>;
-	  setMusicIndex: (i: number) => void;
-	  setMusicPlaying: (p: boolean) => void;
-	  toggleMusicPlaying: () => void;
-	  playNextMusic: () => void;
-	  playPrevMusic: () => void;
-	  seekMusic: (time: number) => void;
-	  setMusicVolume: (v: number) => void;
-	  reorderMusic: (fromIndex: number, toIndex: number) => void;
-	  removeMusic: (id: string) => void;
+  music: MusicItem[];
+  musicIndex: number;
+  musicPlaying: boolean;
+  musicVolume: number;
+  musicCurrentTime: number;
+  musicDuration: number;
+  musicFadeDuration: number; // seconds for fade in/out
+  loadMusic: () => Promise<void>;
+  setMusicIndex: (i: number) => void;
+  setMusicPlaying: (p: boolean) => void;
+  toggleMusicPlaying: () => void;
+  playNextMusic: () => void;
+  playPrevMusic: () => void;
+  seekMusic: (time: number) => void;
+  setMusicVolume: (v: number) => void;
+  reorderMusic: (fromIndex: number, toIndex: number) => void;
+  removeMusic: (id: string) => void;
+  setMusicFadeDuration: (s: number) => void;
 
   // ── Display ────────────────────────────────────────────────────────────
   monitors: Monitor[];
-  outputMonitorIndex: number | null; // null = kein Output-Monitor ausgewählt
+  outputMonitorIndex: number | null;
   outputWindowOpen: boolean;
   fetchMonitors: () => Promise<void>;
   setOutputMonitor: (i: number | null) => Promise<void>;
@@ -180,76 +197,76 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   // ── Slides ──────────────────────────────────────────────────────────────
-	  slides: [],
-	  activeSlideId: null,
+  slides: [],
+  activeSlideId: null,
 
-	  loadMedia: async () => {
-	    const { setLoading, setError, clearError } = get();
-	    const imageExt = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp"]);
-	    const videoExt = new Set(["mp4", "mov", "avi", "mkv", "webm"]);
-	    const allExt = [...imageExt, ...videoExt];
+  loadMedia: async () => {
+    const { setLoading, setError, clearError } = get();
+    const imageExt = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp"]);
+    const videoExt = new Set(["mp4", "mov", "avi", "mkv", "webm"]);
+    const allExt = [...imageExt, ...videoExt];
 
-	    const extOf = (p: string) => {
-	      const file = p.split(/[\\/]/).pop() ?? p;
-	      const idx = file.lastIndexOf(".");
-	      return idx >= 0 ? file.slice(idx + 1).toLowerCase() : "";
-	    };
+    const extOf = (p: string) => {
+      const file = p.split(/[\\/]/).pop() ?? p;
+      const idx = file.lastIndexOf(".");
+      return idx >= 0 ? file.slice(idx + 1).toLowerCase() : "";
+    };
 
-	    try {
-	      setLoading(true);
-	      clearError();
-	      const files = await openDialog({
-	        multiple: true,
-	        filters: [
-	          { name: "Medien", extensions: allExt },
-	          { name: "Bilder", extensions: [...imageExt] },
-	          { name: "Videos", extensions: [...videoExt] },
-	        ],
-	      });
-	      if (!files) return;
-	      const arr = Array.isArray(files) ? files : [files];
+    try {
+      setLoading(true);
+      clearError();
+      const files = await openDialog({
+        multiple: true,
+        filters: [
+          { name: "Medien", extensions: allExt },
+          { name: "Bilder", extensions: [...imageExt] },
+          { name: "Videos", extensions: [...videoExt] },
+        ],
+      });
+      if (!files) return;
+      const arr = Array.isArray(files) ? files : [files];
 
-	      const slidesToAdd: MediaItem[] = [];
-	      const videosToAdd: MediaItem[] = [];
+      const slidesToAdd: MediaItem[] = [];
+      const videosToAdd: MediaItem[] = [];
 
-	      for (const f of arr) {
-	        const path = f as string;
-	        const name = path.split(/[\\/]/).pop() ?? path;
-	        const ext = extOf(path);
-	        if (imageExt.has(ext)) {
-	          slidesToAdd.push({
-	            id: crypto.randomUUID(),
-	            name,
-	            path,
-	            src: convertFileSrc(path),
-	            type: "image",
-	          });
-	        } else if (videoExt.has(ext)) {
-	          videosToAdd.push({
-	            id: crypto.randomUUID(),
-	            name,
-	            path,
-	            src: convertFileSrc(path),
-	            type: "video",
-	          });
-	        }
-	      }
+      for (const f of arr) {
+        const path = f as string;
+        const name = path.split(/[\\/]/).pop() ?? path;
+        const ext = extOf(path);
+        if (imageExt.has(ext)) {
+          slidesToAdd.push({
+            id: crypto.randomUUID(),
+            name,
+            path,
+            src: convertFileSrc(path),
+            type: "image",
+          });
+        } else if (videoExt.has(ext)) {
+          videosToAdd.push({
+            id: crypto.randomUUID(),
+            name,
+            path,
+            src: convertFileSrc(path),
+            type: "video",
+          });
+        }
+      }
 
-	      set((s) => ({
-	        slides: slidesToAdd.length ? [...s.slides, ...slidesToAdd] : s.slides,
-	        videos: videosToAdd.length ? [...s.videos, ...videosToAdd] : s.videos,
-	      }));
-	    } catch (err) {
-	      setError(err instanceof Error ? err.message : "Fehler beim Laden der Medien");
-	    } finally {
-	      setLoading(false);
-	    }
-	  },
+      set((s) => ({
+        slides: slidesToAdd.length ? [...s.slides, ...slidesToAdd] : s.slides,
+        videos: videosToAdd.length ? [...s.videos, ...videosToAdd] : s.videos,
+      }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Fehler beim Laden der Medien");
+    } finally {
+      setLoading(false);
+    }
+  },
 
-	  loadSlides: async () => {
-	    const { setLoading, setError, clearError } = get();
-	    try {
-	      setLoading(true);
+  loadSlides: async () => {
+    const { setLoading, setError, clearError } = get();
+    try {
+      setLoading(true);
       clearError();
       const files = await openDialog({
         multiple: true,
@@ -295,42 +312,42 @@ export const useStore = create<Store>((set, get) => ({
   pptxGroups: [],
   expandedGroupId: null,
 
-	  loadPptx: async () => {
-	    const { setLoading, setError, clearError } = get();
-	    try {
-	      setLoading(true);
-	      clearError();
-	      const files = await openDialog({
-	        multiple: true,
-	        filters: [{ name: "PowerPoint", extensions: ["pptx"] }],
-	      });
-	      if (!files) return;
-	      const arr = Array.isArray(files) ? files : [files];
-	      
-	      for (const file of arr) {
-	        const filePath = file as string;
-	        const pptxFile = await invoke<any>("import_pptx", { path: filePath });
-	        const groupId = crypto.randomUUID();
-	        
-	        const slides: MediaItem[] = pptxFile.slides.map((slide: any) => ({
-	          id: crypto.randomUUID(),
-	          name: slide.name,
-	          path: filePath,
-	          src: convertFileSrc(slide.image_path),
-	          type: "image",
-	          groupId,
-	        }));
-	        
-	        set((s) => ({
-	          pptxGroups: [...s.pptxGroups, { id: groupId, name: pptxFile.name, slides }],
-	        }));
-	      }
-	    } catch (err) {
-	      setError(err instanceof Error ? err.message : "Fehler beim Laden der PowerPoint-Datei");
-	    } finally {
-	      setLoading(false);
-	    }
-	  },
+  loadPptx: async () => {
+    const { setLoading, setError, clearError } = get();
+    try {
+      setLoading(true);
+      clearError();
+      const files = await openDialog({
+        multiple: true,
+        filters: [{ name: "PowerPoint", extensions: ["pptx"] }],
+      });
+      if (!files) return;
+      const arr = Array.isArray(files) ? files : [files];
+
+      for (const file of arr) {
+        const filePath = file as string;
+        const pptxFile = await invoke<any>("import_pptx", { path: filePath });
+        const groupId = crypto.randomUUID();
+
+        const slides: MediaItem[] = pptxFile.slides.map((slide: any) => ({
+          id: crypto.randomUUID(),
+          name: slide.name,
+          path: filePath,
+          src: convertFileSrc(slide.image_path),
+          type: "image",
+          groupId,
+        }));
+
+        set((s) => ({
+          pptxGroups: [...s.pptxGroups, { id: groupId, name: pptxFile.name, slides }],
+        }));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Fehler beim Laden der PowerPoint-Datei");
+    } finally {
+      setLoading(false);
+    }
+  },
 
   toggleExpandGroup: (groupId) =>
     set((s) => ({ expandedGroupId: s.expandedGroupId === groupId ? null : groupId })),
@@ -402,130 +419,176 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   // ── Countdown ──────────────────────────────────────────────────────────
-	  countdownDuration: 300,
-	  countdownRemaining: 300,
-	  countdownLabel: "Gottesdienst beginnt in",
-	  countdownRunning: false,
-	  countdownLive: false,
-	  countdownTargetTime: null,
-	  countdownTheme: "minimal",
+  countdownRemaining: 0,
+  countdownLabel: "Gottesdienst beginnt in",
+  countdownRunning: false,
+  countdownLive: false,
+  countdownTargetTime: null,
+  countdownTheme: "minimal",
+  countdownBackgroundMusicId: null,
 
-	  setCountdownDuration: (s) => set({ countdownDuration: s, countdownRemaining: s }),
-	  setCountdownLabel: (l) => set({ countdownLabel: l }),
-	  setCountdownTargetTime: (t) => set({ countdownTargetTime: t }),
+  setCountdownLabel: (l) => set({ countdownLabel: l }),
+  setCountdownTargetTime: (t) => set({ countdownTargetTime: t }),
 
-	  applyCountdownTargetTime: () => {
-	    const t = get().countdownTargetTime;
-	    if (!t) return;
-	    const m = /^(\d{1,2}):(\d{2})$/.exec(t.trim());
-	    if (!m) return;
-	    const hh = Number(m[1]);
-	    const mm = Number(m[2]);
-	    if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return;
+  applyCountdownTargetTime: () => {
+    const t = get().countdownTargetTime;
+    if (!t) return;
+    const diffSeconds = secondsUntilTargetTime(t);
+    if (diffSeconds <= 0) return;
 
-	    const now = new Date();
-	    const target = new Date(now);
-	    target.setHours(hh, mm, 0, 0);
-	    if (target.getTime() <= now.getTime()) {
-	      target.setDate(target.getDate() + 1);
-	    }
-	    const diffSeconds = Math.max(0, Math.round((target.getTime() - now.getTime()) / 1000));
+    if (countdownInterval) {
+      clearInterval(countdownInterval);
+      countdownInterval = null;
+    }
+    set({ countdownRunning: false, countdownRemaining: diffSeconds });
 
-	    if (countdownInterval) {
-	      clearInterval(countdownInterval);
-	      countdownInterval = null;
-	    }
-	    set({ countdownRunning: false, countdownDuration: diffSeconds, countdownRemaining: diffSeconds });
+    if (get().countdownLive) {
+      sendToOutput({
+        mode: "countdown",
+        countdown: {
+          remaining: diffSeconds,
+          label: get().countdownLabel,
+          running: false,
+          theme: get().countdownTheme,
+          targetTime: t,
+        },
+      });
+    }
+  },
 
-	    if (get().countdownLive) {
-	      sendToOutput({
-	        mode: "countdown",
-	        countdown: {
-	          remaining: diffSeconds,
-	          label: get().countdownLabel,
-	          running: false,
-	          theme: get().countdownTheme,
-	        },
-	      });
-	    }
-	  },
+  setCountdownTheme: (theme) => {
+    set({ countdownTheme: theme });
+    if (get().countdownLive) {
+      sendToOutput({
+        mode: "countdown",
+        countdown: {
+          remaining: get().countdownRemaining,
+          label: get().countdownLabel,
+          running: get().countdownRunning,
+          theme,
+          targetTime: get().countdownTargetTime,
+        },
+      });
+    }
+  },
 
-	  setCountdownTheme: (theme) => {
-	    set({ countdownTheme: theme });
-	    if (get().countdownLive) {
-	      sendToOutput({
-	        mode: "countdown",
-	        countdown: {
-	          remaining: get().countdownRemaining,
-	          label: get().countdownLabel,
-	          running: get().countdownRunning,
-	          theme,
-	        },
-	      });
-	    }
-	  },
+  setCountdownBackgroundMusic: (id) => {
+    set({ countdownBackgroundMusicId: id });
+  },
 
-	  startCountdown: () => {
-	    if (get().countdownRunning) return;
-	    set({ countdownRunning: true });
-	    countdownInterval = setInterval(() => {
-	      const { countdownRemaining, countdownLabel, countdownLive, stopCountdown, countdownTheme } = get();
-	      const next = countdownRemaining - 1;
-	      set({ countdownRemaining: Math.max(next, 0) });
-	      if (countdownLive) {
-	        sendToOutput({
-	          mode: "countdown",
-	          countdown: { remaining: Math.max(next, 0), label: countdownLabel, running: true, theme: countdownTheme },
-	        });
-	      }
-	      if (next <= 0) stopCountdown();
-	    }, 1000);
-	  },
+  startCountdown: () => {
+    const { countdownTargetTime, countdownBackgroundMusicId, songs } = get();
 
-	  stopCountdown: () => {
-	    if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
-	    set({ countdownRunning: false });
-	    const { countdownRemaining, countdownLabel, countdownTheme } = get();
-	    if (get().countdownLive) {
-	      sendToOutput({
-	        mode: "countdown",
-	        countdown: { remaining: countdownRemaining, label: countdownLabel, running: false, theme: countdownTheme },
-	      });
-	    }
-	  },
+    // Start background music if configured
+    if (countdownBackgroundMusicId && countdownTargetTime) {
+      const song = songs.find((s) => s.id === countdownBackgroundMusicId);
+      if (song && song.slides.length > 0) {
+        // Use first slide text as file path (user should paste file path there)
+        const audioPath = song.slides[0]?.text;
+        if (audioPath) {
+          const a = ensureBackgroundMusicAudio();
+          if (a) {
+            const bgMusicSrc = convertFileSrc(audioPath);
+            a.src = bgMusicSrc;
+            
+            // Calculate delay so music ends at 0:00
+            const remainingSeconds = secondsUntilTargetTime(countdownTargetTime);
+            
+            a.addEventListener("loadedmetadata", () => {
+              const musicDuration = a.duration;
+              const delayMs = (remainingSeconds - musicDuration) * 1000;
+              
+              if (delayMs > 0) {
+                setTimeout(() => {
+                  a.play().catch(() => {});
+                }, delayMs);
+              } else {
+                a.play().catch(() => {});
+              }
+            });
+          }
+        }
+      }
+    }
 
-	  resetCountdown: () => {
-	    if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
-	    const d = get().countdownDuration;
-	    set({ countdownRunning: false, countdownRemaining: d });
-	    if (get().countdownLive) {
-	      sendToOutput({
-	        mode: "countdown",
-	        countdown: { remaining: d, label: get().countdownLabel, running: false, theme: get().countdownTheme },
-	      });
-	    }
-	  },
+    if (get().countdownRunning) return;
 
-	  setCountdownLive: (live) => {
-	    set({ countdownLive: live, outputMode: live ? "countdown" : get().outputMode, isBlackout: false });
-	    if (live) {
-	      sendToOutput({
-	        mode: "countdown",
-	        countdown: {
-	          remaining: get().countdownRemaining,
-	          label: get().countdownLabel,
-	          running: get().countdownRunning,
-	          theme: get().countdownTheme,
-	        },
-	      });
-	    } else {
-	      sendToOutput({ mode: "blank" });
-	    }
-	  },
+    // Recalculate remaining time based on target
+    const t = get().countdownTargetTime;
+    if (t) {
+      const diffSeconds = secondsUntilTargetTime(t);
+      set({ countdownRemaining: diffSeconds });
+    }
+
+    set({ countdownRunning: true });
+    countdownInterval = setInterval(() => {
+      const { countdownRemaining, countdownLabel, countdownLive, stopCountdown, countdownTheme, countdownTargetTime } = get();
+      const next = countdownRemaining - 1;
+      set({ countdownRemaining: Math.max(next, 0) });
+      if (countdownLive) {
+        sendToOutput({
+          mode: "countdown",
+          countdown: { remaining: Math.max(next, 0), label: countdownLabel, running: true, theme: countdownTheme, targetTime: countdownTargetTime },
+        });
+      }
+      if (next <= 0) stopCountdown();
+    }, 1000);
+  },
+
+  stopCountdown: () => {
+    if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
+    set({ countdownRunning: false });
+    const { countdownRemaining, countdownLabel, countdownTheme, countdownTargetTime } = get();
+    if (get().countdownLive) {
+      sendToOutput({
+        mode: "countdown",
+        countdown: { remaining: countdownRemaining, label: countdownLabel, running: false, theme: countdownTheme, targetTime: countdownTargetTime },
+      });
+    }
+  },
+
+  resetCountdown: () => {
+    if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
+    const t = get().countdownTargetTime;
+    let diffSeconds = 0;
+    if (t) {
+      diffSeconds = secondsUntilTargetTime(t);
+    }
+    set({ countdownRunning: false, countdownRemaining: diffSeconds });
+    if (get().countdownLive) {
+      sendToOutput({
+        mode: "countdown",
+        countdown: { remaining: diffSeconds, label: get().countdownLabel, running: false, theme: get().countdownTheme, targetTime: t },
+      });
+    }
+  },
+
+  setCountdownLive: (live) => {
+    set({ countdownLive: live, outputMode: live ? "countdown" : get().outputMode, isBlackout: false });
+    if (live) {
+      sendToOutput({
+        mode: "countdown",
+        countdown: {
+          remaining: get().countdownRemaining,
+          label: get().countdownLabel,
+          running: get().countdownRunning,
+          theme: get().countdownTheme,
+          targetTime: get().countdownTargetTime,
+        },
+      });
+    } else {
+      sendToOutput({ mode: "blank" });
+    }
+  },
 
   // ── Video ──────────────────────────────────────────────────────────────
   videos: [],
   activeVideoId: null,
+  videoStartTime: null,
+  videoEndTime: null,
+
+  setVideoStartTime: (s) => set({ videoStartTime: s }),
+  setVideoEndTime: (s) => set({ videoEndTime: s }),
 
   loadVideos: async () => {
     const { setLoading, setError, clearError } = get();
@@ -540,7 +603,7 @@ export const useStore = create<Store>((set, get) => ({
       const arr = Array.isArray(files) ? files : [files];
       const items: MediaItem[] = arr.map((f) => ({
         id: crypto.randomUUID(),
-        name: (f as string).split(/[\\/]/).pop() ?? (f as string),
+        name: (f as string).split(/[\\/]/).pop() ?? f as string,
         path: f as string,
         src: convertFileSrc(f as string),
         type: "video",
@@ -555,21 +618,26 @@ export const useStore = create<Store>((set, get) => ({
 
   goLiveVideo: (id) => {
     const video = get().videos.find((v) => v.id === id);
+    const startTime = get().videoStartTime ?? undefined;
+    const endTime = get().videoEndTime ?? undefined;
     if (!video) return;
     set({ activeVideoId: id, outputMode: "video", isBlackout: false });
-    sendToOutput({ mode: "video", video: { src: video.src, playing: true } });
+    sendToOutput({ mode: "video", video: { src: video.src, playing: true, startTime, endTime } });
   },
 
   removeVideo: (id) =>
     set((s) => ({ videos: s.videos.filter((x) => x.id !== id) })),
 
   // ── Music ──────────────────────────────────────────────────────────────
-	  music: [],
-	  musicIndex: 0,
-	  musicPlaying: false,
-	  musicVolume: 1,
-	  musicCurrentTime: 0,
-	  musicDuration: 0,
+  music: [],
+  musicIndex: 0,
+  musicPlaying: false,
+  musicVolume: 1,
+  musicCurrentTime: 0,
+  musicDuration: 0,
+  musicFadeDuration: 2, // 2 seconds default fade
+
+  setMusicFadeDuration: (s) => set({ musicFadeDuration: s }),
 
   loadMusic: async () => {
     const { setLoading, setError, clearError } = get();
@@ -584,7 +652,7 @@ export const useStore = create<Store>((set, get) => ({
       const arr = Array.isArray(files) ? files : [files];
       const items: MusicItem[] = arr.map((f) => ({
         id: crypto.randomUUID(),
-        name: (f as string).split(/[\\/]/).pop() ?? (f as string),
+        name: (f as string).split(/[\\/]/).pop() ?? f as string,
         path: f as string,
         src: convertFileSrc(f as string),
       }));
@@ -596,61 +664,102 @@ export const useStore = create<Store>((set, get) => ({
     }
   },
 
-	  setMusicIndex: (i) => set({ musicIndex: i }),
-	  setMusicPlaying: (p) => {
-	    set({ musicPlaying: p });
-	    const a = ensureMusicAudio();
-	    if (!a) return;
-	    if (p) a.play().catch(() => {});
-	    else a.pause();
-	  },
+  setMusicIndex: (i) => set({ musicIndex: i }),
+  setMusicPlaying: (p) => {
+    const fadeDuration = get().musicFadeDuration;
+    const a = ensureMusicAudio();
+    if (!a) return;
 
-	  toggleMusicPlaying: () => get().setMusicPlaying(!get().musicPlaying),
+    if (p) {
+      // Fade in
+      a.volume = 0;
+      a.play().catch(() => {});
+      set({ musicPlaying: true });
 
-	  playNextMusic: () => {
-	    const { music, musicIndex, setMusicIndex, setMusicPlaying } = get();
-	    if (music.length === 0) return;
-	    const next = (musicIndex + 1) % music.length;
-	    setMusicIndex(next);
-	    set({ musicCurrentTime: 0 });
-	    setMusicPlaying(true);
-	  },
+      // Fade in over fadeDuration seconds
+      const fadeSteps = 20;
+      const stepTime = (fadeDuration * 1000) / fadeSteps;
+      let step = 0;
+      const fadeInterval = setInterval(() => {
+        step++;
+        const newVolume = Math.min(1, step / fadeSteps);
+        if (a && !a.paused) {
+          a.volume = newVolume;
+        }
+        if (step >= fadeSteps) {
+          clearInterval(fadeInterval);
+        }
+      }, stepTime);
+    } else {
+      // Fade out
+      set({ musicPlaying: false });
+      const startVolume = a.volume;
+      const fadeSteps = 20;
+      const stepTime = (fadeDuration * 1000) / fadeSteps;
+      let step = 0;
+      const fadeInterval = setInterval(() => {
+        step++;
+        const newVolume = Math.max(0, startVolume * (1 - step / fadeSteps));
+        if (a) {
+          a.volume = newVolume;
+        }
+        if (step >= fadeSteps) {
+          clearInterval(fadeInterval);
+          if (a) a.pause();
+          // Reset volume for next track
+          setTimeout(() => {
+            if (a) a.volume = get().musicVolume;
+          }, 100);
+        }
+      }, stepTime);
+    }
+  },
 
-	  playPrevMusic: () => {
-	    const { music, musicIndex, setMusicIndex, setMusicPlaying } = get();
-	    if (music.length === 0) return;
-	    const prev = (musicIndex - 1 + music.length) % music.length;
-	    setMusicIndex(prev);
-	    set({ musicCurrentTime: 0 });
-	    setMusicPlaying(true);
-	  },
+  toggleMusicPlaying: () => get().setMusicPlaying(!get().musicPlaying),
 
-	  seekMusic: (time) => {
-	    const a = ensureMusicAudio();
-	    const t = Number.isFinite(time) ? Math.max(0, time) : 0;
-	    set({ musicCurrentTime: t });
-	    if (a) {
-	      try {
-	        a.currentTime = t;
-	      } catch {
-	        // ignore
-	      }
-	    }
-	  },
+  playNextMusic: () => {
+    const { music, musicIndex, setMusicIndex, setMusicPlaying } = get();
+    if (music.length === 0) return;
+    const next = (musicIndex + 1) % music.length;
+    setMusicIndex(next);
+    set({ musicCurrentTime: 0 });
+    setMusicPlaying(true);
+  },
 
-	  setMusicVolume: (v) => {
-	    const vol = Math.max(0, Math.min(1, v));
-	    set({ musicVolume: vol });
-	    const a = ensureMusicAudio();
-	    if (a) a.volume = vol;
-	  },
+  playPrevMusic: () => {
+    const { music, musicIndex, setMusicIndex, setMusicPlaying } = get();
+    if (music.length === 0) return;
+    const prev = (musicIndex - 1 + music.length) % music.length;
+    setMusicIndex(prev);
+    set({ musicCurrentTime: 0 });
+    setMusicPlaying(true);
+  },
+
+  seekMusic: (time) => {
+    const a = ensureMusicAudio();
+    const t = Number.isFinite(time) ? Math.max(0, time) : 0;
+    set({ musicCurrentTime: t });
+    if (a) {
+      try {
+        a.currentTime = t;
+      } catch {
+        // ignore
+      }
+    }
+  },
+
+  setMusicVolume: (v) => {
+    const vol = Math.max(0, Math.min(1, v));
+    set({ musicVolume: vol });
+    const a = ensureMusicAudio();
+    if (a) a.volume = vol;
+  },
 
   reorderMusic: (fromIndex: number, toIndex: number) => {
     set((s) => {
       const newMusic = [...s.music];
       const [removed] = newMusic.splice(fromIndex, 1);
       newMusic.splice(toIndex, 0, removed);
-      // Adjust musicIndex if needed
       let newIndex = s.musicIndex;
       if (fromIndex === s.musicIndex) {
         newIndex = toIndex;
@@ -663,64 +772,55 @@ export const useStore = create<Store>((set, get) => ({
     });
   },
 
-	  removeMusic: (id) =>
-	    set((s) => {
-	      const nextMusic = s.music.filter((x) => x.id !== id);
-	      const wasPlaying = s.musicPlaying;
-	      if (nextMusic.length === 0) {
-	        const a = ensureMusicAudio();
-	        if (a) a.pause();
-	        return {
-	          music: [],
-	          musicIndex: 0,
-	          musicPlaying: false,
-	          musicCurrentTime: 0,
-	          musicDuration: 0,
-	        };
-	      }
+  removeMusic: (id) =>
+    set((s) => {
+      const nextMusic = s.music.filter((x) => x.id !== id);
+      if (nextMusic.length === 0) {
+        const a = ensureMusicAudio();
+        if (a) a.pause();
+        return {
+          music: [],
+          musicIndex: 0,
+          musicPlaying: false,
+          musicCurrentTime: 0,
+          musicDuration: 0,
+        };
+      }
 
-	      // Keep index in range.
-	      const nextIndex = Math.min(s.musicIndex, nextMusic.length - 1);
-	      if (wasPlaying && nextIndex !== s.musicIndex) {
-	        // track changed; currentTime will be reset by engine sync
-	      }
-
-	      return { music: nextMusic, musicIndex: nextIndex };
-	    }),
+      const nextIndex = Math.min(s.musicIndex, nextMusic.length - 1);
+      return { music: nextMusic, musicIndex: nextIndex };
+    }),
 
   // ── Display ──────────────────────────────────────────────────────────────
   monitors: [],
   outputMonitorIndex: null,
   outputWindowOpen: false,
 
-	  fetchMonitors: async () => {
-	    try {
-	      const monitors = await invoke<Monitor[]>("get_monitors");
-	      set({ monitors });
+  fetchMonitors: async () => {
+    try {
+      const monitors = await invoke<Monitor[]>("get_monitors");
+      set({ monitors });
 
-	      // If a monitor is already configured, (re)open and place the output window.
-	      const configured = get().outputMonitorIndex;
-	      if (configured !== null) {
-	        if (configured >= 0 && configured < monitors.length) {
-	          await get().setOutputMonitor(configured);
-	        } else {
-	          set({ outputMonitorIndex: null, outputWindowOpen: false });
-	        }
-	      }
-	    } catch (err) {
-	      console.warn("Could not fetch monitors:", err);
-	      set({ monitors: [] });
-	    }
+      const configured = get().outputMonitorIndex;
+      if (configured !== null) {
+        if (configured >= 0 && configured < monitors.length) {
+          await get().setOutputMonitor(configured);
+        } else {
+          set({ outputMonitorIndex: null, outputWindowOpen: false });
+        }
+      }
+    } catch (err) {
+      console.warn("Could not fetch monitors:", err);
+      set({ monitors: [] });
+    }
   },
 
   setOutputMonitor: async (i) => {
     set({ outputMonitorIndex: i });
     if (i === null) {
-      // Close output window
       await closeOutputFn();
       set({ outputWindowOpen: false });
     } else {
-      // Open/reposition output window on selected monitor
       try {
         const m = get().monitors[i];
         if (m) {
@@ -732,7 +832,6 @@ export const useStore = create<Store>((set, get) => ({
         console.error("Failed to set output monitor:", err);
         const msg = formatUnknownError(err);
         set({ error: `Ausgabefenster konnte nicht geöffnet werden: ${msg}` });
-        return;
       }
     }
   },
@@ -747,36 +846,34 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   // ── Persist settings ────────────────────────────────────────────────────
-	  loadSettings: () => {
-	    try {
-	      const saved = localStorage.getItem(STORAGE_KEY);
-	      if (saved) {
-	        const parsed = JSON.parse(saved);
-	        set({
-	          countdownDuration: parsed.countdownDuration ?? 300,
-	          countdownRemaining: parsed.countdownDuration ?? 300,
-	          countdownLabel: parsed.countdownLabel ?? "Gottesdienst beginnt in",
-	          countdownTargetTime: parsed.countdownTargetTime ?? null,
-	          countdownTheme: parsed.countdownTheme ?? "minimal",
-	          outputMonitorIndex: parsed.outputMonitorIndex ?? null,
-	        });
-	      }
-	    } catch {
-	      console.warn("Could not load settings");
+  loadSettings: () => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        set({
+          countdownLabel: parsed.countdownLabel ?? "Gottesdienst beginnt in",
+          countdownTargetTime: parsed.countdownTargetTime ?? null,
+          countdownTheme: parsed.countdownTheme ?? "minimal",
+          outputMonitorIndex: parsed.outputMonitorIndex ?? null,
+        });
+      }
+    } catch {
+      console.warn("Could not load settings");
     }
   },
 
-	  saveSettings: () => {
-	    try {
-	      const { countdownDuration, countdownLabel, countdownTargetTime, countdownTheme, outputMonitorIndex } = get();
-	      localStorage.setItem(
-	        STORAGE_KEY,
-	        JSON.stringify({ countdownDuration, countdownLabel, countdownTargetTime, countdownTheme, outputMonitorIndex })
-	      );
-	    } catch {
-	      console.warn("Could not save settings");
-	    }
-	  },
+  saveSettings: () => {
+    try {
+      const { countdownLabel, countdownTargetTime, countdownTheme, outputMonitorIndex } = get();
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ countdownLabel, countdownTargetTime, countdownTheme, outputMonitorIndex })
+      );
+    } catch {
+      console.warn("Could not save settings");
+    }
+  },
 }));
 
 function initMusicEngine() {
@@ -787,7 +884,6 @@ function initMusicEngine() {
     const s = useStore.getState();
     const current = s.music[s.musicIndex];
 
-    // Source
     const nextSrc = current?.src ?? "";
     if (nextSrc && musicAudioSrc !== nextSrc) {
       a.src = nextSrc;
@@ -801,12 +897,10 @@ function initMusicEngine() {
       if (s.musicPlaying && a.paused) a.play().catch(() => {});
     }
 
-    // Volume
     if (Number.isFinite(s.musicVolume) && a.volume !== s.musicVolume) {
       a.volume = s.musicVolume;
     }
 
-    // Play state
     if (s.musicPlaying) {
       if (a.paused) a.play().catch(() => {});
     } else if (!a.paused) {
@@ -834,7 +928,6 @@ function initMusicEngine() {
     useStore.getState().playNextMusic();
   });
 
-  // Initial sync + keep in sync
   syncFromState();
   useStore.subscribe(syncFromState);
 }
@@ -847,7 +940,6 @@ useStore.subscribe((state, prevState) => {
   }
 
   const changed =
-    state.countdownDuration !== prevState.countdownDuration ||
     state.countdownLabel !== prevState.countdownLabel ||
     state.countdownTargetTime !== prevState.countdownTargetTime ||
     state.countdownTheme !== prevState.countdownTheme ||

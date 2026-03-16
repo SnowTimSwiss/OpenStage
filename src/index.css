@@ -33,6 +33,49 @@ html, body, #root {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
 
+/* Transitions */
+.transition-fade {
+  transition: opacity 500ms ease-in-out;
+}
+
+.transition-slide {
+  transition: transform 500ms ease-in-out, opacity 500ms ease-in-out;
+}
+
+.transition-zoom {
+  transition: transform 500ms ease-in-out, opacity 500ms ease-in-out;
+}
+
+.transition-slide-enter {
+  transform: translateX(100%);
+  opacity: 0;
+}
+
+.transition-slide-enter-active {
+  transform: translateX(0);
+  opacity: 1;
+}
+
+.transition-slide-exit {
+  transform: translateX(0);
+  opacity: 1;
+}
+
+.transition-slide-exit-active {
+  transform: translateX(-100%);
+  opacity: 0;
+}
+
+.transition-zoom-enter {
+  transform: scale(1.1);
+  opacity: 0;
+}
+
+.transition-zoom-enter-active {
+  transform: scale(1);
+  opacity: 1;
+}
+
 /* Glow pulse for live indicators */
 @keyframes pulse-glow {
   0%, 100% { opacity: 1; box-shadow: 0 0 4px var(--success); }
