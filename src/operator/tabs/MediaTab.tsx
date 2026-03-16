@@ -85,13 +85,12 @@ export default function MediaTab() {
 	      try {
 	        // Calling with the same index is fine; it will (re)open/reposition.
 	        await setOutputMonitor(outputMonitorIndex);
-	        return;
 	      } catch {
 	        // Fall through to just opening the output window.
 	      }
 	    }
 
-	    if (!outputWindowOpen) {
+	    if (!useStore.getState().outputWindowOpen && !outputWindowOpen) {
 	      await openOutputWindow();
 	    }
 	  }

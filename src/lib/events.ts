@@ -1,9 +1,12 @@
 import { emit } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
 import type { OutputPayload } from "../types";
 
 export const OUTPUT_EVENT = "openstage:output";
 export const VIDEO_CTRL_EVENT = "openstage:video-ctrl";
+
+let outputWindowOpening: Promise<WebviewWindow> | null = null;
 
 /** Broadcast a state update to the output window */
 export async function sendToOutput(payload: OutputPayload) {
@@ -25,6 +28,16 @@ export async function sendVideoControl(action: "play" | "pause") {
 
 /** Open the output window (or focus if already open) */
 export async function openOutputWindow() {
+  if (outputWindowOpening) return outputWindowOpening;
+  outputWindowOpening = openOutputWindowInternal();
+  try {
+    return await outputWindowOpening;
+  } finally {
+    outputWindowOpening = null;
+  }
+}
+
+async function openOutputWindowInternal() {
   const existing = await WebviewWindow.getByLabel("output");
   if (existing) {
     await existing.show();
@@ -32,7 +45,10 @@ export async function openOutputWindow() {
     return existing;
   }
 
-  const w = new WebviewWindow("output", {
+  let w: WebviewWindow;
+
+  try {
+    w = new WebviewWindow("output", {
     url: "/?window=output",
     title: "OpenStage — Output",
     decorations: false,
@@ -40,7 +56,12 @@ export async function openOutputWindow() {
     resizable: true,
     width: 1280,
     height: 720,
-  });
+    });
+  } catch (err) {
+    const existingAfter = await WebviewWindow.getByLabel("output");
+    if (existingAfter) return existingAfter;
+    throw err;
+  }
 
   // Wait for window to be created with timeout
   try {
@@ -56,10 +77,18 @@ export async function openOutputWindow() {
       });
     });
   } catch (err) {
+    // Fallback: sometimes the created event races; poll for the label briefly.
+    for (let i = 0; i < 20; i++) {
+      const recovered = await WebviewWindow.getByLabel("output");
+      if (recovered) return recovered;
+      await new Promise((r) => setTimeout(r, 50));
+    }
     console.error("Failed to create output window:", err);
     throw err;
   }
 
+  await w.show();
+  await w.setFocus();
   return w;
 }
 
@@ -70,19 +99,37 @@ export async function assignOutputToMonitor(
   width: number,
   height: number
 ) {
-  const w = await WebviewWindow.getByLabel("output");
-  if (!w) {
+  let windowInstance = await WebviewWindow.getByLabel("output");
+  if (!windowInstance) {
     console.warn("Output window not found, trying to create it...");
     await openOutputWindow();
   }
-  const windowInstance = await WebviewWindow.getByLabel("output");
-  if (!windowInstance) {
-    throw new Error("Could not create output window");
+
+  for (let i = 0; i < 20 && !windowInstance; i++) {
+    await new Promise((r) => setTimeout(r, 50));
+    windowInstance = await WebviewWindow.getByLabel("output");
   }
-  await windowInstance.setPosition({ type: "Physical", x, y } as any);
-  await windowInstance.setSize({ type: "Physical", width, height } as any);
-  await windowInstance.setFullscreen(true);
-  await windowInstance.setFocus();
+
+  if (!windowInstance) throw new Error("Could not create output window");
+
+  const apply = async () => {
+    await windowInstance!.show();
+    await windowInstance!.setPosition(new PhysicalPosition(x, y));
+    await windowInstance!.setSize(new PhysicalSize(width, height));
+    try {
+      await windowInstance!.setFullscreen(true);
+    } catch (err) {
+      console.warn("Failed to fullscreen output window:", err);
+    }
+    await windowInstance!.setFocus();
+  };
+
+  try {
+    await apply();
+  } catch (err) {
+    await new Promise((r) => setTimeout(r, 100));
+    await apply();
+  }
 }
 
 /** Close the output window */

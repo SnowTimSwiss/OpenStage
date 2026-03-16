@@ -12,6 +12,21 @@ const STORAGE_KEY = "openstage-settings-v1";
 
 let countdownInterval: ReturnType<typeof setInterval> | null = null;
 
+function formatUnknownError(err: unknown): string {
+  if (err instanceof Error) return `${err.name}: ${err.message}`;
+  if (typeof err === "string") return err;
+  if (err && typeof err === "object") {
+    const maybeMessage = (err as any).message ?? (err as any).error ?? (err as any).reason;
+    if (typeof maybeMessage === "string" && maybeMessage.trim()) return maybeMessage;
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return String(err);
+    }
+  }
+  return String(err);
+}
+
 interface Store {
   // ── UI ─────────────────────────────────────────────────────────────────
   activeTab: TabId;
@@ -620,7 +635,9 @@ export const useStore = create<Store>((set, get) => ({
         }
       } catch (err) {
         console.error("Failed to set output monitor:", err);
-        set({ error: "Ausgabefenster konnte nicht geöffnet werden" });
+        const msg = formatUnknownError(err);
+        set({ error: `Ausgabefenster konnte nicht geöffnet werden: ${msg}` });
+        return;
       }
     }
   },
