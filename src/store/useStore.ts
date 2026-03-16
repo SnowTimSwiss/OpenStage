@@ -470,8 +470,13 @@ export const useStore = create<Store>((set, get) => ({
   setSelectedMonitor: (i) => set({ selectedMonitor: i }),
 
   openOutput: async () => {
-    await openOutputWindow();
-    set({ outputWindowReady: true });
+    try {
+      await openOutputWindow();
+      set({ outputWindowReady: true });
+    } catch (err) {
+      console.error("Failed to open output window:", err);
+      set({ error: "Ausgabefenster konnte nicht geöffnet werden" });
+    }
   },
 
   // ── Persist settings ────────────────────────────────────────────────────

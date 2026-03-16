@@ -35,6 +35,9 @@ export default function MediaTab() {
   const dragIndex = useStore((s) => (s as any).dragIndex ?? -1);
   const setDragIndex = (i: number) => (useStore as any).setState({ dragIndex: i });
 
+  // Image error tracking
+  const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
+
   function handleDragStart(e: React.DragEvent, index: number) {
     e.dataTransfer.setData("text/plain", index.toString());
     e.dataTransfer.effectAllowed = "move";
@@ -177,13 +180,25 @@ export default function MediaTab() {
                                 boxShadow: active ? "0 0 16px #f9731640" : "none",
                               }}
                             >
-                              <div className="aspect-video bg-black">
+                              <div className="aspect-video bg-black relative">
                                 <img
                                   src={slide.src}
                                   alt={slide.name}
                                   className="w-full h-full object-contain"
                                   draggable={false}
+                                  onError={() => {
+                                    console.warn("Failed to load image:", slide.name, slide.src?.substring(0, 50));
+                                    setImageErrors((prev) => ({ ...prev, [slide.id]: true }));
+                                  }}
                                 />
+                                {imageErrors[slide.id] && (
+                                  <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">
+                                    <div className="text-center">
+                                      <span className="text-2xl">⚠️</span>
+                                      <p className="text-xs text-zinc-500 mt-1">Vorschau nicht verfügbar</p>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                               <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                 <span className="text-white text-xs font-bold">LIVE</span>
@@ -330,13 +345,25 @@ export default function MediaTab() {
                     }}
                     onClick={() => goLiveSlide(slide.id)}
                   >
-                    <div className="aspect-video bg-black">
+                    <div className="aspect-video bg-black relative">
                       <img
                         src={slide.src}
                         alt={slide.name}
                         className="w-full h-full object-contain"
                         draggable={false}
+                        onError={() => {
+                          console.warn("Failed to load image:", slide.name, slide.src?.substring(0, 50));
+                          setImageErrors((prev) => ({ ...prev, [slide.id]: true }));
+                        }}
                       />
+                      {imageErrors[slide.id] && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">
+                          <div className="text-center">
+                            <span className="text-2xl">⚠️</span>
+                            <p className="text-xs text-zinc-500 mt-1">Vorschau nicht verfügbar</p>
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                       <span className="text-white text-xs font-bold">LIVE</span>

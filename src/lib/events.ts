@@ -34,9 +34,22 @@ export async function openOutputWindow() {
     height: 720,
   });
 
-  await new Promise<void>((resolve) => {
-    w.once("tauri://created", () => resolve());
-  });
+  // Wait for window to be created with timeout
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("Window creation timeout")), 5000);
+      w.once("tauri://created", () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+      w.once("tauri://error", (e) => {
+        clearTimeout(timeout);
+        reject(e);
+      });
+    });
+  } catch (err) {
+    console.error("Failed to create output window:", err);
+  }
 
   return w;
 }
