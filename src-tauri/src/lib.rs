@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::io::{Read, Write};
+use std::io::Read;
 use zip::read::ZipArchive;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
@@ -98,8 +98,7 @@ fn import_pptx(path: String) -> Result<PptxFile, String> {
         // Fallback: search for any image for this slide
         if !found_image {
             for idx in 0..archive.len() {
-                let file = archive.by_index(idx).ok();
-                if let Ok(mut f) = file {
+                if let Ok(mut f) = archive.by_index(idx) {
                     let name = f.name().to_string();
                     if name.contains("media/image") && name.ends_with(".png") {
                         let mut buffer = Vec::new();
@@ -125,8 +124,7 @@ fn import_pptx(path: String) -> Result<PptxFile, String> {
     // If no slides found, try to extract all images as fallback
     if slides.is_empty() {
         for idx in 0..archive.len() {
-            let file = archive.by_index(idx).ok();
-            if let Ok(mut f) = file {
+            if let Ok(mut f) = archive.by_index(idx) {
                 let name = f.name().to_string();
                 if name.contains("media/") && (name.ends_with(".png") || name.ends_with(".jpg") || name.ends_with(".jpeg")) {
                     let mut buffer = Vec::new();
