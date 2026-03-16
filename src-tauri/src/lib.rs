@@ -4,6 +4,12 @@ use std::path::PathBuf;
 use tauri::Listener;
 use zip::read::ZipArchive;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpotifyAuthResponse {
+    pub code: String,
+    pub state: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Monitor {
     pub name: String,
@@ -52,6 +58,129 @@ fn get_monitors(app: tauri::AppHandle) -> Result<Vec<Monitor>, String> {
             .collect()),
         Err(e) => Err(format!("Failed to get monitors: {}", e)),
     }
+}
+
+#[tauri::command]
+fn start_spotify_auth_server(app: tauri::AppHandle, port: u16) -> Result<String, String> {
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
+    use tauri::Emitter;
+    
+    let server_running = Arc::new(AtomicBool::new(true));
+    let server_running_clone = server_running.clone();
+    let app_handle_clone = app.clone();
+
+    fn percent_decode(input: &str) -> String {
+        let mut out = String::with_capacity(input.len());
+        let bytes = input.as_bytes();
+        let mut i = 0usize;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'%' if i + 2 < bytes.len() => {
+                    let h1 = bytes[i + 1];
+                    let h2 = bytes[i + 2];
+                    let to_val = |h: u8| -> Option<u8> {
+                        match h {
+                            b'0'..=b'9' => Some(h - b'0'),
+                            b'a'..=b'f' => Some(h - b'a' + 10),
+                            b'A'..=b'F' => Some(h - b'A' + 10),
+                            _ => None,
+                        }
+                    };
+                    if let (Some(v1), Some(v2)) = (to_val(h1), to_val(h2)) {
+                        out.push((v1 * 16 + v2) as char);
+                        i += 3;
+                        continue;
+                    }
+                    out.push('%');
+                    i += 1;
+                }
+                b'+' => {
+                    out.push(' ');
+                    i += 1;
+                }
+                b => {
+                    out.push(b as char);
+                    i += 1;
+                }
+            }
+        }
+        out
+    }
+    
+    // Bind once and move the listener into the server thread.
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+        .map_err(|e| format!("Port {} already in use: {}", port, e))?;
+
+    thread::spawn(move || {
+        listener.set_nonblocking(true).ok();
+        
+        // Wait for callback (timeout after 5 minutes)
+        let start = std::time::Instant::now();
+        let timeout = Duration::from_secs(300);
+        
+        while start.elapsed() < timeout && server_running_clone.load(Ordering::SeqCst) {
+            if let Ok((mut stream, _)) = listener.accept() {
+                use std::io::{Read, Write};
+                let mut buffer = [0; 4096];
+                if let Ok(n) = stream.read(&mut buffer) {
+                    let request = String::from_utf8_lossy(&buffer[..n]);
+
+                    // Parse request line: "GET /callback?code=... HTTP/1.1"
+                    let request_line = request.lines().next().unwrap_or("");
+                    let path = request_line.split_whitespace().nth(1).unwrap_or("");
+
+                    if let Some(query) = path.strip_prefix("/callback?") {
+                        let mut code: Option<String> = None;
+                        for part in query.split('&') {
+                            let mut it = part.splitn(2, '=');
+                            let key = it.next().unwrap_or("");
+                            let val = it.next().unwrap_or("");
+                            if key == "code" {
+                                code = Some(percent_decode(val));
+                                break;
+                            }
+                        }
+
+                        if let Some(code) = code {
+                            // Send success response
+                            let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
+                                <!DOCTYPE html><html><head><title>Success</title>\
+                                <script>window.close();</script></head>\
+                                <body><h1>✅ Erfolgreich mit Spotify verbunden!</h1>\
+                                <p>Dieses Fenster kann geschlossen werden.</p></body></html>";
+                            let _ = stream.write_all(response.as_bytes());
+
+                            // Emit event to frontend with the code
+                            let _ = app_handle_clone.emit("spotify-auth-callback", code);
+
+                            server_running_clone.store(false, Ordering::SeqCst);
+                            break;
+                        }
+                    }
+                    
+                    // Send error response for other requests
+                    let response = "HTTP/1.1 400 Bad Request\r\n\r\n";
+                    let _ = stream.write_all(response.as_bytes());
+                }
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        
+        server_running_clone.store(false, Ordering::SeqCst);
+    });
+    
+    // Wait a moment for server to start
+    thread::sleep(Duration::from_millis(100));
+    
+    if !server_running.load(Ordering::SeqCst) {
+        return Err("Failed to start auth server".to_string());
+    }
+    
+    Ok(format!("http://127.0.0.1:{}/callback", port))
 }
 
 #[tauri::command]
@@ -223,6 +352,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // Clean up temp files on exit
             let app_handle = app.handle().clone();
@@ -231,7 +361,11 @@ pub fn run() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_monitors, import_pptx])
+        .invoke_handler(tauri::generate_handler![
+            get_monitors,
+            import_pptx,
+            start_spotify_auth_server
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

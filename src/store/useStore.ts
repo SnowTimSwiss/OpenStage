@@ -5,16 +5,81 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { sendToOutput, openOutputWindow, assignOutputToMonitor, closeOutputWindow as closeOutputFn } from "../lib/events";
 import { secondsUntilTargetTime } from "../lib/formatTime";
 import type {
-  Song, MediaItem, MusicItem,
+  Song, MediaItem, MusicItem, Playlist, SpotifyAuthState, MusicSource,
   Monitor, TabId, OutputMode, PptxGroup, CountdownTheme,
 } from "../types";
 
 const STORAGE_KEY = "openstage-settings-v1";
+const PLAYLISTS_KEY = "openstage-playlists-v1";
+const SPOTIFY_KEY = "openstage-spotify-v1";
+const SPOTIFY_REDIRECT_KEY = "openstage-spotify-redirect-uri-v1";
+
+// ── Spotify PKCE Helper Functions ─────────────────────────────────────────
+
+function generateRandomString(length: number): string {
+  const array = new Uint8Array(length);
+  crypto.getRandomValues(array);
+  return Array.from(array, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function generateCodeChallenge(codeVerifier: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(codeVerifier);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return btoa(String.fromCodePoint(...new Uint8Array(digest)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+async function exchangeCodeForToken(code: string): Promise<{ access_token: string; refresh_token: string; expires_in: number }> {
+  const clientId = import.meta.env.VITE_SPOTIFY_CLIENT_ID || "";
+  const storedRedirectUri = localStorage.getItem(SPOTIFY_REDIRECT_KEY) || "";
+  const redirectUri =
+    storedRedirectUri ||
+    import.meta.env.VITE_SPOTIFY_REDIRECT_URI ||
+    "http://localhost:5173/spotify-callback";
+  const codeVerifier = localStorage.getItem("spotify_code_verifier") || "";
+
+  if (!clientId || !codeVerifier) {
+    throw new Error("Spotify configuration missing");
+  }
+
+  // PKCE flow without client secret (secure for frontend apps)
+  const response = await fetch("https://accounts.spotify.com/api/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: redirectUri,
+      code_verifier: codeVerifier,
+      client_id: clientId,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(`Token exchange failed: ${response.status} - ${errorData.error_description || errorData.error || "Unknown error"}`);
+  }
+
+  return await response.json();
+}
 
 let countdownInterval: ReturnType<typeof setInterval> | null = null;
 let musicAudio: HTMLAudioElement | null = null;
 let musicAudioSrc: string | null = null;
 let backgroundMusicAudio: HTMLAudioElement | null = null;
+
+// Spotify auth state
+let spotifyAuth: SpotifyAuthState = {
+  isAuthenticated: false,
+  accessToken: null,
+  refreshToken: null,
+  expiresAt: null,
+};
 
 function formatUnknownError(err: unknown): string {
   if (err instanceof Error) return `${err.name}: ${err.message}`;
@@ -154,6 +219,26 @@ interface Store {
   reorderMusic: (fromIndex: number, toIndex: number) => void;
   removeMusic: (id: string) => void;
   setMusicFadeDuration: (s: number) => void;
+
+  // ── Playlists ──────────────────────────────────────────────────────────
+  playlists: Playlist[];
+  activePlaylistId: string | null;
+  createPlaylist: (name: string, description?: string) => Playlist;
+  deletePlaylist: (id: string) => void;
+  updatePlaylist: (id: string, updates: Partial<Playlist>) => void;
+  addTrackToPlaylist: (playlistId: string, track: MusicItem) => void;
+  removeTrackFromPlaylist: (playlistId: string, trackId: string) => void;
+  setActivePlaylist: (id: string | null) => void;
+  loadPlaylist: (playlistId: string) => void;
+  importSpotifyPlaylist: (playlistUri: string) => Promise<void>;
+
+  // ── Spotify ────────────────────────────────────────────────────────────
+  spotifyAuth: SpotifyAuthState;
+  setSpotifyAuth: (auth: SpotifyAuthState) => void;
+  exchangeSpotifyCode: (code: string) => Promise<void>;
+  connectSpotify: () => Promise<void>;
+  disconnectSpotify: () => void;
+  fetchSpotifyPlaylists: () => Promise<any[]>;
 
   // ── Display ────────────────────────────────────────────────────────────
   monitors: Monitor[];
@@ -655,6 +740,7 @@ export const useStore = create<Store>((set, get) => ({
         name: (f as string).split(/[\\/]/).pop() ?? f as string,
         path: f as string,
         src: convertFileSrc(f as string),
+        source: "local" as MusicSource,
       }));
       set((s) => ({ music: [...s.music, ...items] }));
     } catch (err) {
@@ -791,6 +877,298 @@ export const useStore = create<Store>((set, get) => ({
       return { music: nextMusic, musicIndex: nextIndex };
     }),
 
+  // ── Playlists ──────────────────────────────────────────────────────────
+  playlists: [],
+  activePlaylistId: null,
+
+  createPlaylist: (name, description) => {
+    const newPlaylist: Playlist = {
+      id: crypto.randomUUID(),
+      name,
+      description,
+      tracks: [],
+      source: "local",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    set((s) => ({ playlists: [...s.playlists, newPlaylist] }));
+    savePlaylists();
+    return newPlaylist;
+  },
+
+  deletePlaylist: (id) => {
+    set((s) => ({ playlists: s.playlists.filter((p) => p.id !== id) }));
+    if (get().activePlaylistId === id) {
+      set({ activePlaylistId: null, music: [], musicIndex: 0, musicPlaying: false });
+    }
+    savePlaylists();
+  },
+
+  updatePlaylist: (id, updates) => {
+    set((s) => ({
+      playlists: s.playlists.map((p) =>
+        p.id === id ? { ...p, ...updates, updatedAt: Date.now() } : p
+      ),
+    }));
+    savePlaylists();
+  },
+
+  addTrackToPlaylist: (playlistId, track) => {
+    set((s) => ({
+      playlists: s.playlists.map((p) =>
+        p.id === playlistId
+          ? { ...p, tracks: [...p.tracks, track], updatedAt: Date.now() }
+          : p
+      ),
+    }));
+    savePlaylists();
+  },
+
+  removeTrackFromPlaylist: (playlistId, trackId) => {
+    set((s) => ({
+      playlists: s.playlists.map((p) =>
+        p.id === playlistId
+          ? { ...p, tracks: p.tracks.filter((t) => t.id !== trackId), updatedAt: Date.now() }
+          : p
+      ),
+    }));
+    savePlaylists();
+  },
+
+  setActivePlaylist: (id) => {
+    set({ activePlaylistId: id });
+    if (id) {
+      const playlist = get().playlists.find((p) => p.id === id);
+      if (playlist) {
+        set({ music: playlist.tracks, musicIndex: 0, musicPlaying: false });
+      }
+    }
+  },
+
+  loadPlaylist: (playlistId) => {
+    const playlist = get().playlists.find((p) => p.id === playlistId);
+    if (playlist) {
+      set({ music: playlist.tracks, musicIndex: 0, musicPlaying: false, activePlaylistId: playlistId });
+    }
+  },
+
+  importSpotifyPlaylist: async (playlistUri) => {
+    const { spotifyAuth } = get();
+    if (!spotifyAuth.isAuthenticated || !spotifyAuth.accessToken) {
+      throw new Error("Spotify nicht verbunden");
+    }
+
+    try {
+      // Parse playlist ID from URI (spotify:playlist:xxxxx or URL)
+      let playlistId = playlistUri;
+      if (playlistUri.includes("playlist/")) {
+        playlistId = playlistUri.split("playlist/")[1].split("?")[0];
+      } else if (playlistUri.startsWith("spotify:playlist:")) {
+        playlistId = playlistUri.replace("spotify:playlist:", "");
+      }
+
+      const response = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}`, {
+        headers: {
+          Authorization: `Bearer ${spotifyAuth.accessToken}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Spotify API Error: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      const newPlaylist: Playlist = {
+        id: crypto.randomUUID(),
+        name: data.name,
+        description: data.description || "",
+        tracks: [],
+        source: "spotify",
+        spotifyId: data.id,
+        spotifyUri: data.uri,
+        coverArt: data.images?.[0]?.url,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      // Fetch tracks
+      const tracksResponse = await fetch(data.tracks.href, {
+        headers: {
+          Authorization: `Bearer ${spotifyAuth.accessToken}`,
+        },
+      });
+
+      if (tracksResponse.ok) {
+        const tracksData = await tracksResponse.json();
+        newPlaylist.tracks = tracksData.items
+          .filter((item: any) => item.track && item.track.id)
+          .map((item: any) => {
+            const track = item.track;
+            return {
+              id: crypto.randomUUID(),
+              name: `${track.name} - ${track.artists?.[0]?.name || "Unknown"}`,
+              path: "",
+              src: track.preview_url || "",
+              source: "spotify" as MusicSource,
+              artist: track.artists?.[0]?.name,
+              album: track.album?.name,
+              albumArt: track.album?.images?.[0]?.url,
+              duration: track.duration_ms / 1000,
+              spotifyId: track.id,
+              spotifyUri: track.uri,
+              playlistId: newPlaylist.id,
+            } as MusicItem;
+          });
+      }
+
+      set((s) => ({ playlists: [...s.playlists, newPlaylist] }));
+      savePlaylists();
+    } catch (err) {
+      console.error("Failed to import Spotify playlist:", err);
+      throw err;
+    }
+  },
+
+  // ── Spotify ────────────────────────────────────────────────────────────
+  spotifyAuth: {
+    isAuthenticated: false,
+    accessToken: null,
+    refreshToken: null,
+    expiresAt: null,
+  },
+  setSpotifyAuth: (auth: SpotifyAuthState) => {
+    spotifyAuth = auth;
+    set({ spotifyAuth });
+    saveSpotifyAuth();
+  },
+  exchangeSpotifyCode: async (code: string) => {
+    try {
+      const tokens = await exchangeCodeForToken(code);
+      spotifyAuth = {
+        isAuthenticated: true,
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        expiresAt: Date.now() + tokens.expires_in * 1000,
+      };
+      set({ spotifyAuth });
+      saveSpotifyAuth();
+      localStorage.removeItem("spotify_code_verifier");
+    } catch (err) {
+      console.error("Failed to exchange Spotify code:", err);
+      throw err;
+    }
+  },
+
+  connectSpotify: async () => {
+    // Spotify OAuth2 PKCE configuration (no client secret needed for PKCE)
+    const clientId = import.meta.env.VITE_SPOTIFY_CLIENT_ID || "";
+    const scopes = "playlist-read-private playlist-read-collaborative user-read-email user-library-read";
+
+    if (!clientId) {
+      throw new Error("Spotify Client ID nicht konfiguriert. Bitte VITE_SPOTIFY_CLIENT_ID in .env setzen.");
+    }
+
+    set({ isLoading: true, error: null });
+
+    // For PKCE flow, we generate a code verifier and challenge
+    const codeVerifier = generateRandomString(64);
+    const codeChallenge = await generateCodeChallenge(codeVerifier);
+
+    // Store verifier for later
+    localStorage.setItem("spotify_code_verifier", codeVerifier);
+
+    // Start local auth server to receive callback
+    const { listen } = await import("@tauri-apps/api/event");
+    
+    // Use a fixed port by default (Spotify redirect URIs must match exactly)
+    const port = Number(import.meta.env.VITE_SPOTIFY_AUTH_PORT) || 8080;
+    
+    try {
+      const redirectUri = await invoke<string>("start_spotify_auth_server", { port });
+      localStorage.setItem(SPOTIFY_REDIRECT_KEY, redirectUri);
+      
+      // Listen for auth callback event
+      const unlisten = await listen<string>("spotify-auth-callback", (event) => {
+        const code = event.payload;
+        console.log("Received Spotify auth code:", code);
+        
+        // Auto-exchange the code
+        get().exchangeSpotifyCode(code).catch((err) => {
+          console.error("Auto-exchange failed:", err);
+          set({ error: `Spotify Verbindung fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}` });
+        });
+        
+        // Cleanup
+        unlisten();
+      });
+
+      // Open Spotify authorization page in external browser
+      const authUrl = `https://accounts.spotify.com/authorize?client_id=${clientId}&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scopes)}&code_challenge_method=S256&code_challenge=${codeChallenge}`;
+
+      try {
+        const { openUrl } = await import("@tauri-apps/plugin-opener");
+        await openUrl(authUrl);
+      } catch (openErr) {
+        // Fallback for web / missing plugin: at least try to open a new tab.
+        if (typeof window !== "undefined") {
+          window.open(authUrl, "_blank", "noopener,noreferrer");
+        } else {
+          throw openErr;
+        }
+      }
+
+      set({
+        isLoading: false,
+        error: "Spotify Autorisierung im Browser geöffnet. Nach der Anmeldung wirst du automatisch verbunden.",
+      });
+    } catch (err) {
+      console.error("Failed to start Spotify auth:", err);
+      set({
+        error: `Spotify Auth Error: ${err instanceof Error ? err.message : String(err)}`,
+        isLoading: false,
+      });
+    }
+  },
+
+  disconnectSpotify: () => {
+    spotifyAuth = {
+      isAuthenticated: false,
+      accessToken: null,
+      refreshToken: null,
+      expiresAt: null,
+    };
+    set({ spotifyAuth });
+    localStorage.removeItem(SPOTIFY_KEY);
+    localStorage.removeItem(SPOTIFY_REDIRECT_KEY);
+    localStorage.removeItem("spotify_code_verifier");
+  },
+
+  fetchSpotifyPlaylists: async () => {
+    const { spotifyAuth } = get();
+    if (!spotifyAuth.isAuthenticated || !spotifyAuth.accessToken) {
+      return [];
+    }
+
+    try {
+      const response = await fetch("https://api.spotify.com/v1/me/playlists", {
+        headers: {
+          Authorization: `Bearer ${spotifyAuth.accessToken}`,
+        },
+      });
+
+      if (!response.ok) {
+        return [];
+      }
+
+      const data = await response.json();
+      return data.items || [];
+    } catch (err) {
+      console.error("Failed to fetch Spotify playlists:", err);
+      return [];
+    }
+  },
+
   // ── Display ──────────────────────────────────────────────────────────────
   monitors: [],
   outputMonitorIndex: null,
@@ -861,6 +1239,8 @@ export const useStore = create<Store>((set, get) => ({
     } catch {
       console.warn("Could not load settings");
     }
+    loadPlaylists();
+    loadSpotifyAuth();
   },
 
   saveSettings: () => {
@@ -875,6 +1255,66 @@ export const useStore = create<Store>((set, get) => ({
     }
   },
 }));
+
+// ── Playlist & Spotify Persistence ────────────────────────────────────────
+
+function savePlaylists() {
+  try {
+    const { playlists } = useStore.getState();
+    // Don't persist Spotify-sourced playlists with full track data (too large)
+    // Instead, store playlist metadata and re-fetch on load
+    const toPersist = playlists.map((p) => ({
+      ...p,
+      tracks: p.source === "local" ? p.tracks : [], // Only persist local tracks
+    }));
+    localStorage.setItem(PLAYLISTS_KEY, JSON.stringify(toPersist));
+  } catch {
+    console.warn("Could not save playlists");
+  }
+}
+
+function loadPlaylists() {
+  try {
+    const saved = localStorage.getItem(PLAYLISTS_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      const loadedPlaylists: Playlist[] = parsed.map((p: Playlist) => ({
+        ...p,
+        createdAt: p.createdAt || Date.now(),
+        updatedAt: p.updatedAt || Date.now(),
+      }));
+      useStore.setState({ playlists: loadedPlaylists });
+    }
+  } catch {
+    console.warn("Could not load playlists");
+  }
+}
+
+function saveSpotifyAuth() {
+  try {
+    localStorage.setItem(SPOTIFY_KEY, JSON.stringify(spotifyAuth));
+  } catch {
+    console.warn("Could not save Spotify auth");
+  }
+}
+
+function loadSpotifyAuth() {
+  try {
+    const saved = localStorage.getItem(SPOTIFY_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      spotifyAuth = {
+        isAuthenticated: parsed.isAuthenticated ?? false,
+        accessToken: parsed.accessToken ?? null,
+        refreshToken: parsed.refreshToken ?? null,
+        expiresAt: parsed.expiresAt ?? null,
+      };
+      useStore.setState({ spotifyAuth });
+    }
+  } catch {
+    console.warn("Could not load Spotify auth");
+  }
+}
 
 function initMusicEngine() {
   const a = ensureMusicAudio();

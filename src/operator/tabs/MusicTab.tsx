@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { useStore } from "../../store/useStore";
+import type { MusicItem, Playlist } from "../../types";
 
 export default function MusicTab() {
   const music = useStore((s) => s.music);
@@ -7,6 +9,10 @@ export default function MusicTab() {
   const musicCurrentTime = useStore((s) => s.musicCurrentTime);
   const musicDuration = useStore((s) => s.musicDuration);
   const musicVolume = useStore((s) => s.musicVolume);
+  const playlists = useStore((s) => s.playlists);
+  const activePlaylistId = useStore((s) => s.activePlaylistId);
+  const spotifyAuth = useStore((s) => s.spotifyAuth);
+  
   const loadMusic = useStore((s) => s.loadMusic);
   const setMusicIndex = useStore((s) => s.setMusicIndex);
   const setMusicPlaying = useStore((s) => s.setMusicPlaying);
@@ -16,6 +22,16 @@ export default function MusicTab() {
   const setMusicVolume = useStore((s) => s.setMusicVolume);
   const removeMusic = useStore((s) => s.removeMusic);
   const reorderMusic = useStore((s) => s.reorderMusic);
+  const createPlaylist = useStore((s) => s.createPlaylist);
+  const setActivePlaylist = useStore((s) => s.setActivePlaylist);
+  const addTrackToPlaylist = useStore((s) => s.addTrackToPlaylist);
+  const connectSpotify = useStore((s) => s.connectSpotify);
+  const importSpotifyPlaylist = useStore((s) => s.importSpotifyPlaylist);
+
+  const [showCreatePlaylist, setShowCreatePlaylist] = useState(false);
+  const [newPlaylistName, setNewPlaylistName] = useState("");
+  const [showSpotifyModal, setShowSpotifyModal] = useState(false);
+  const [spotifyPlaylistUri, setSpotifyPlaylistUri] = useState("");
 
   const current = music[musicIndex];
   const dragIndex = useStore((s) => (s as any).dragIndex ?? -1);
@@ -52,28 +68,150 @@ export default function MusicTab() {
     return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
   }
 
+  function handleCreatePlaylist() {
+    if (!newPlaylistName.trim()) return;
+    createPlaylist(newPlaylistName.trim());
+    setNewPlaylistName("");
+    setShowCreatePlaylist(false);
+  }
+
+  function handleSelectPlaylist(playlistId: string | null) {
+    setActivePlaylist(playlistId);
+  }
+
+  async function handleConnectSpotify() {
+    try {
+      await connectSpotify();
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function handleImportSpotifyPlaylist() {
+    if (!spotifyPlaylistUri.trim()) return;
+    try {
+      await importSpotifyPlaylist(spotifyPlaylistUri.trim());
+      setSpotifyPlaylistUri("");
+    } catch (err) {
+      console.error("Failed to import playlist:", err);
+      alert("Fehler beim Importieren der Playlist. Ist die URI korrekt?");
+    }
+  }
+
+  function handleAddToPlaylist(playlist: Playlist, track: MusicItem) {
+    addTrackToPlaylist(playlist.id, track);
+  }
+
   return (
     <div className="flex flex-col h-full">
+      {/* Header with Playlist Selector */}
       <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: "#252525" }}>
-        <h2 className="text-sm font-semibold text-white">Musik</h2>
-        <button
-          onClick={loadMusic}
-          className="text-xs px-3 py-1.5 rounded font-medium"
-          style={{ background: "#f97316", color: "white" }}
-        >
-          + Hinzufügen
-        </button>
+        <div className="flex items-center gap-3">
+          <h2 className="text-sm font-semibold text-white">Musik</h2>
+          
+          {/* Playlist Selector */}
+          <select
+            value={activePlaylistId || ""}
+            onChange={(e) => handleSelectPlaylist(e.target.value || null)}
+            className="text-xs px-2 py-1 rounded bg-[#1a1a1a] text-gray-300 border border-[#333]"
+          >
+            <option value="">Alle Tracks</option>
+            {playlists.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.source === "spotify" ? "🟢" : "📁"} {p.name} ({p.tracks.length})
+              </option>
+            ))}
+          </select>
+        </div>
+        
+        <div className="flex items-center gap-2">
+          {/* Spotify Button */}
+          {spotifyAuth.isAuthenticated ? (
+            <button
+              onClick={() => setShowSpotifyModal(true)}
+              className="text-xs px-3 py-1.5 rounded font-medium flex items-center gap-1"
+              style={{ background: "#1DB954", color: "white" }}
+            >
+              🟢 Spotify
+            </button>
+          ) : (
+            <button
+              onClick={handleConnectSpotify}
+              className="text-xs px-3 py-1.5 rounded font-medium flex items-center gap-1"
+              style={{ background: "#1DB954", color: "white" }}
+            >
+              + Spotify
+            </button>
+          )}
+          
+          {/* Create Playlist Button */}
+          <button
+            onClick={() => setShowCreatePlaylist(true)}
+            className="text-xs px-3 py-1.5 rounded font-medium"
+            style={{ background: "#252525", color: "#aaa" }}
+          >
+            + Playlist
+          </button>
+          
+          {/* Add Music Button */}
+          <button
+            onClick={loadMusic}
+            className="text-xs px-3 py-1.5 rounded font-medium"
+            style={{ background: "#f97316", color: "white" }}
+          >
+            + Hinzufügen
+          </button>
+        </div>
       </div>
 
       {/* Player */}
       {current && (
         <div className="px-4 py-4 border-b" style={{ borderColor: "#252525", background: "#0d0d0d" }}>
-          <div className="text-center mb-4">
-            <div className="text-2xl mb-2">🎵</div>
-            <div className="text-sm font-semibold text-white truncate">{current.name}</div>
-            <div className="text-xs mt-0.5" style={{ color: "#555" }}>
-              {musicIndex + 1} / {music.length}
+          <div className="flex items-center gap-3 mb-4">
+            {current.albumArt ? (
+              <img src={current.albumArt} alt="" className="w-12 h-12 rounded object-cover" />
+            ) : (
+              <div className="w-12 h-12 rounded flex items-center justify-center text-xl" style={{ background: "#1a1a1a" }}>
+                🎵
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-white truncate">{current.name}</div>
+              {current.artist && (
+                <div className="text-xs mt-0.5" style={{ color: "#888" }}>{current.artist}</div>
+              )}
+              <div className="text-xs mt-0.5" style={{ color: "#555" }}>
+                {musicIndex + 1} / {music.length} {current.source === "spotify" ? "(Spotify)" : ""}
+              </div>
             </div>
+            
+            {/* Add to Playlist Dropdown */}
+            {playlists.length > 0 && (
+              <div className="relative group">
+                <button
+                  className="text-xs px-2 py-1 rounded"
+                  style={{ background: "#1a1a1a", color: "#888" }}
+                >
+                  ⋯
+                </button>
+                <div className="absolute right-0 mt-1 w-48 bg-[#1a1a1a] border border-[#333] rounded shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
+                  <div className="py-1">
+                    <div className="px-3 py-2 text-xs font-medium text-gray-400 border-b border-[#333]">
+                      Zu Playlist hinzufügen
+                    </div>
+                    {playlists.map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => handleAddToPlaylist(p, current)}
+                        className="w-full text-left px-3 py-2 text-xs text-gray-300 hover:bg-[#252525] transition-colors"
+                      >
+                        {p.source === "spotify" ? "🟢" : "📁"} {p.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-2 mb-3">
@@ -133,16 +271,21 @@ export default function MusicTab() {
         </div>
       )}
 
-      {/* Queue */}
+      {/* Queue / Tracks */}
       <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-1">
         {music.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
             <span className="text-5xl">🎧</span>
             <p className="text-white font-medium">Keine Musik geladen</p>
             <p className="text-sm" style={{ color: "#555" }}>MP3, WAV, FLAC, AAC und mehr</p>
-            <button onClick={loadMusic} className="text-sm px-4 py-2 rounded" style={{ background: "#f97316", color: "white" }}>
-              Musik laden
-            </button>
+            <div className="flex gap-2">
+              <button onClick={loadMusic} className="text-sm px-4 py-2 rounded" style={{ background: "#f97316", color: "white" }}>
+                Musik laden
+              </button>
+              <button onClick={() => setShowCreatePlaylist(true)} className="text-sm px-4 py-2 rounded" style={{ background: "#252525", color: "#aaa" }}>
+                Playlist erstellen
+              </button>
+            </div>
           </div>
         ) : (
           music.map((track, i) => {
@@ -155,7 +298,7 @@ export default function MusicTab() {
                 onDragOver={(e) => handleDragOver(e, i)}
                 onDrop={(e) => handleDrop(e, i)}
                 onDragEnd={handleDragEnd}
-                className="flex items-center gap-3 p-2.5 rounded-lg cursor-pointer"
+                className="flex items-center gap-3 p-2.5 rounded-lg cursor-pointer group"
                 style={{
                   background: isActive ? "#f9731610" : "transparent",
                   border: isActive ? "1px solid #f9731430" : "1px solid transparent",
@@ -166,12 +309,31 @@ export default function MusicTab() {
                 <span className="text-xs font-mono w-5 text-right shrink-0" style={{ color: isActive ? "#f97316" : "#444" }}>
                   {isActive && musicPlaying ? "♪" : i + 1}
                 </span>
-                <span className="flex-1 text-sm truncate" style={{ color: isActive ? "#f97316" : "#ccc" }}>
-                  {track.name}
-                </span>
+                
+                {track.albumArt ? (
+                  <img src={track.albumArt} alt="" className="w-8 h-8 rounded object-cover" />
+                ) : (
+                  <span className="text-lg w-8 h-8 flex items-center justify-center">🎵</span>
+                )}
+                
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm truncate" style={{ color: isActive ? "#f97316" : "#ccc" }}>
+                    {track.name}
+                  </div>
+                  {track.artist && (
+                    <div className="text-xs truncate" style={{ color: "#666" }}>{track.artist}</div>
+                  )}
+                </div>
+                
+                {track.source === "spotify" && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: "#1DB95420", color: "#1DB954" }}>
+                    Spotify
+                  </span>
+                )}
+                
                 <button
                   onClick={(e) => { e.stopPropagation(); removeMusic(track.id); }}
-                  className="text-xs opacity-0 hover:opacity-100 transition-opacity px-1.5 py-0.5 rounded"
+                  className="text-xs opacity-0 group-hover:opacity-100 hover:opacity-100 transition-opacity px-1.5 py-0.5 rounded"
                   style={{ color: "#ef4444" }}
                 >
                   ✕
@@ -181,6 +343,116 @@ export default function MusicTab() {
           })
         )}
       </div>
+
+      {/* Create Playlist Modal */}
+      {showCreatePlaylist && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-[#1a1a1a] rounded-lg p-6 w-80 border border-[#333]">
+            <h3 className="text-lg font-semibold text-white mb-4">Playlist erstellen</h3>
+            <input
+              type="text"
+              value={newPlaylistName}
+              onChange={(e) => setNewPlaylistName(e.target.value)}
+              placeholder="Playlist-Name"
+              className="w-full px-3 py-2 rounded bg-[#0a0a0a] text-white border border-[#333] text-sm mb-4"
+              autoFocus
+              onKeyDown={(e) => e.key === "Enter" && handleCreatePlaylist()}
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={handleCreatePlaylist}
+                className="flex-1 px-4 py-2 rounded text-sm font-medium"
+                style={{ background: "#f97316", color: "white" }}
+              >
+                Erstellen
+              </button>
+              <button
+                onClick={() => { setShowCreatePlaylist(false); setNewPlaylistName(""); }}
+                className="flex-1 px-4 py-2 rounded text-sm font-medium"
+                style={{ background: "#252525", color: "#aaa" }}
+              >
+                Abbrechen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Spotify Modal */}
+      {showSpotifyModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-[#1a1a1a] rounded-lg p-6 w-96 border border-[#333]">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-2xl">🟢</span>
+              <h3 className="text-lg font-semibold text-white">Spotify</h3>
+            </div>
+
+            {spotifyAuth.isAuthenticated ? (
+              <>
+                <p className="text-sm text-gray-300 mb-4">
+                  ✅ Mit Spotify verbunden. Importiere Playlists mit URI oder Link.
+                </p>
+
+                <div className="mb-4">
+                  <label className="text-xs text-gray-400 block mb-1">Spotify Playlist URI/Link</label>
+                  <input
+                    type="text"
+                    value={spotifyPlaylistUri}
+                    onChange={(e) => setSpotifyPlaylistUri(e.target.value)}
+                    placeholder="spotify:playlist:xxx oder https://..."
+                    className="w-full px-3 py-2 rounded bg-[#0a0a0a] text-white border border-[#333] text-sm"
+                  />
+                </div>
+
+                <button
+                  onClick={handleImportSpotifyPlaylist}
+                  className="w-full mb-3 px-4 py-2 rounded text-sm font-medium"
+                  style={{ background: "#1DB954", color: "white" }}
+                >
+                  Playlist importieren
+                </button>
+
+                <button
+                  onClick={() => { useStore.getState().disconnectSpotify(); setShowSpotifyModal(false); }}
+                  className="w-full px-4 py-2 rounded text-sm font-medium"
+                  style={{ background: "#252525", color: "#ef4444" }}
+                >
+                  Trennen
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-gray-300 mb-4">
+                  Verbinde dich mit Spotify, um deine Playlists zu importieren.
+                  <br /><br />
+                  <strong className="text-white">Ablauf:</strong>
+                  <ol className="list-decimal list-inside mt-2 text-gray-400 text-xs">
+                    <li>"Verbinden" klicken</li>
+                    <li>In Spotify im Browser anmelden</li>
+                    <li>Automatische Verbindung nach Login</li>
+                  </ol>
+                </p>
+
+                <button
+                  onClick={handleConnectSpotify}
+                  className="w-full mb-3 px-4 py-2 rounded text-sm font-medium"
+                  style={{ background: "#1DB954", color: "white" }}
+                >
+                  🟢 Mit Spotify verbinden
+                </button>
+
+                <button
+                  onClick={() => setShowSpotifyModal(false)}
+                  className="w-full px-4 py-2 rounded text-sm font-medium"
+                  style={{ background: "#252525", color: "#aaa" }}
+                >
+                  Abbrechen
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
