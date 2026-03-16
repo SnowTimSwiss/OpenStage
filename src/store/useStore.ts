@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { sendToOutput, openOutputWindow, assignOutputToMonitor, closeOutputWindow as closeOutputFn } from "../lib/events";
 import { secondsUntilTargetTime } from "../lib/formatTime";
-import { resolveSpotifyClientId } from "../lib/spotify";
+import { getSpotifyPlaylistId, resolveSpotifyClientId } from "../lib/spotify";
 import type {
   Song, MediaItem, MusicItem, Playlist, SpotifyAuthState, MusicSource,
   Monitor, TabId, OutputMode, PptxGroup, CountdownTheme,
@@ -73,6 +73,10 @@ let countdownInterval: ReturnType<typeof setInterval> | null = null;
 let musicAudio: HTMLAudioElement | null = null;
 let musicAudioSrc: string | null = null;
 let backgroundMusicAudio: HTMLAudioElement | null = null;
+let countdownBgPlaylistId: string | null = null;
+let countdownBgQueue: MusicItem[] = [];
+let countdownBgIndex = 0;
+let countdownBgBound = false;
 
 // Spotify auth state
 let spotifyAuth: SpotifyAuthState = {
@@ -122,6 +126,92 @@ function ensureBackgroundMusicAudio(): HTMLAudioElement | null {
   backgroundMusicAudio = new Audio();
   backgroundMusicAudio.preload = "metadata";
   return backgroundMusicAudio;
+}
+
+function stopCountdownBackgroundMusic() {
+  const a = ensureBackgroundMusicAudio();
+  countdownBgPlaylistId = null;
+  countdownBgQueue = [];
+  countdownBgIndex = 0;
+  if (!a) return;
+  try {
+    a.pause();
+  } catch {
+    // ignore
+  }
+  try {
+    a.src = "";
+  } catch {
+    // ignore
+  }
+}
+
+function normalizeMinutes(value: unknown, fallback: number): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.min(240, n));
+}
+
+function normalizeVolume(value: unknown, fallback: number): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.min(1, n));
+}
+
+function updateCountdownBgVolume(remainingSeconds: number) {
+  const a = ensureBackgroundMusicAudio();
+  if (!a) return;
+  const {
+    countdownBackgroundMusicVolume,
+    countdownBackgroundMusicFadeStartMinutes,
+    countdownBackgroundMusicFullVolumeMinutes,
+  } = useStore.getState();
+
+  const fadeStartSec = Math.max(0, countdownBackgroundMusicFadeStartMinutes) * 60;
+  const fullSec = Math.max(0, countdownBackgroundMusicFullVolumeMinutes) * 60;
+  const targetVolume = normalizeVolume(countdownBackgroundMusicVolume, 0.6);
+  const clampedFullSec = Math.min(fullSec, fadeStartSec);
+  const rampSec = Math.max(0, fadeStartSec - clampedFullSec);
+
+  let desired = 0;
+  if (fadeStartSec <= 0) {
+    desired = targetVolume;
+  } else if (remainingSeconds > fadeStartSec) {
+    desired = 0;
+  } else if (remainingSeconds <= clampedFullSec) {
+    desired = targetVolume;
+  } else if (rampSec <= 0) {
+    desired = targetVolume;
+  } else {
+    const t = (fadeStartSec - remainingSeconds) / rampSec; // 0..1
+    desired = Math.max(0, Math.min(1, t)) * targetVolume;
+  }
+
+  if (Number.isFinite(desired)) {
+    a.volume = desired;
+  }
+}
+
+function ensureCountdownBgHandlers() {
+  const a = ensureBackgroundMusicAudio();
+  if (!a || countdownBgBound) return;
+  countdownBgBound = true;
+  a.addEventListener("ended", () => {
+    if (!countdownBgQueue.length) return;
+    const { countdownRunning } = useStore.getState();
+    if (!countdownRunning) return;
+    let attempts = 0;
+    while (attempts < countdownBgQueue.length) {
+      countdownBgIndex = (countdownBgIndex + 1) % countdownBgQueue.length;
+      const next = countdownBgQueue[countdownBgIndex];
+      if (next?.src) {
+        a.src = next.src;
+        a.play().catch(() => {});
+        return;
+      }
+      attempts++;
+    }
+  });
 }
 
 interface Store {
@@ -179,12 +269,20 @@ interface Store {
   countdownLive: boolean;
   countdownTargetTime: string | null;
   countdownTheme: CountdownTheme;
-  countdownBackgroundMusicId: string | null;
+  countdownBackgroundMusicId: string | null; // deprecated (song-as-audio-path)
+  countdownBackgroundPlaylistId: string | null;
+  countdownBackgroundMusicVolume: number;
+  countdownBackgroundMusicFadeStartMinutes: number;
+  countdownBackgroundMusicFullVolumeMinutes: number;
   setCountdownLabel: (l: string) => void;
   setCountdownTargetTime: (t: string | null) => void;
   applyCountdownTargetTime: () => void;
   setCountdownTheme: (theme: CountdownTheme) => void;
   setCountdownBackgroundMusic: (id: string | null) => void;
+  setCountdownBackgroundPlaylist: (id: string | null) => void;
+  setCountdownBackgroundMusicVolume: (v: number) => void;
+  setCountdownBackgroundFadeStartMinutes: (m: number) => void;
+  setCountdownBackgroundFullVolumeMinutes: (m: number) => void;
   startCountdown: () => void;
   stopCountdown: () => void;
   resetCountdown: () => void;
@@ -538,6 +636,10 @@ export const useStore = create<Store>((set, get) => ({
   countdownTargetTime: null,
   countdownTheme: "minimal",
   countdownBackgroundMusicId: null,
+  countdownBackgroundPlaylistId: null,
+  countdownBackgroundMusicVolume: 0.6,
+  countdownBackgroundMusicFadeStartMinutes: 10,
+  countdownBackgroundMusicFullVolumeMinutes: 2,
 
   setCountdownLabel: (l) => set({ countdownLabel: l }),
   setCountdownTargetTime: (t) => set({ countdownTargetTime: t }),
@@ -587,38 +689,29 @@ export const useStore = create<Store>((set, get) => ({
   setCountdownBackgroundMusic: (id) => {
     set({ countdownBackgroundMusicId: id });
   },
+  setCountdownBackgroundPlaylist: (id) => set({ countdownBackgroundPlaylistId: id }),
+  setCountdownBackgroundMusicVolume: (v) => set({ countdownBackgroundMusicVolume: normalizeVolume(v, 0.6) }),
+  setCountdownBackgroundFadeStartMinutes: (m) => set({ countdownBackgroundMusicFadeStartMinutes: normalizeMinutes(m, 10) }),
+  setCountdownBackgroundFullVolumeMinutes: (m) => set({ countdownBackgroundMusicFullVolumeMinutes: normalizeMinutes(m, 2) }),
 
   startCountdown: () => {
-    const { countdownTargetTime, countdownBackgroundMusicId, songs } = get();
+    const { countdownTargetTime, countdownBackgroundPlaylistId, playlists } = get();
 
-    // Start background music if configured
-    if (countdownBackgroundMusicId && countdownTargetTime) {
-      const song = songs.find((s) => s.id === countdownBackgroundMusicId);
-      if (song && song.slides.length > 0) {
-        // Use first slide text as file path (user should paste file path there)
-        const audioPath = song.slides[0]?.text;
-        if (audioPath) {
-          const a = ensureBackgroundMusicAudio();
-          if (a) {
-            const bgMusicSrc = convertFileSrc(audioPath);
-            a.src = bgMusicSrc;
-            
-            // Calculate delay so music ends at 0:00
-            const remainingSeconds = secondsUntilTargetTime(countdownTargetTime);
-            
-            a.addEventListener("loadedmetadata", () => {
-              const musicDuration = a.duration;
-              const delayMs = (remainingSeconds - musicDuration) * 1000;
-              
-              if (delayMs > 0) {
-                setTimeout(() => {
-                  a.play().catch(() => {});
-                }, delayMs);
-              } else {
-                a.play().catch(() => {});
-              }
-            });
-          }
+    // Start background playlist if configured
+    if (countdownBackgroundPlaylistId && countdownTargetTime) {
+      const playlist = playlists.find((p) => p.id === countdownBackgroundPlaylistId);
+      const tracks = playlist?.tracks ?? [];
+      const playable = tracks.filter((t) => typeof t.src === "string" && t.src.trim());
+      if (playlist && playable.length > 0) {
+        const a = ensureBackgroundMusicAudio();
+        if (a) {
+          ensureCountdownBgHandlers();
+          countdownBgPlaylistId = playlist.id;
+          countdownBgQueue = playable;
+          countdownBgIndex = 0;
+          a.src = playable[0].src!;
+          a.volume = 0;
+          a.play().catch(() => {});
         }
       }
     }
@@ -630,6 +723,7 @@ export const useStore = create<Store>((set, get) => ({
     if (t) {
       const diffSeconds = secondsUntilTargetTime(t);
       set({ countdownRemaining: diffSeconds });
+      updateCountdownBgVolume(diffSeconds);
     }
 
     set({ countdownRunning: true });
@@ -637,6 +731,7 @@ export const useStore = create<Store>((set, get) => ({
       const { countdownRemaining, countdownLabel, countdownLive, stopCountdown, countdownTheme, countdownTargetTime } = get();
       const next = countdownRemaining - 1;
       set({ countdownRemaining: Math.max(next, 0) });
+      updateCountdownBgVolume(Math.max(next, 0));
       if (countdownLive) {
         sendToOutput({
           mode: "countdown",
@@ -650,6 +745,7 @@ export const useStore = create<Store>((set, get) => ({
   stopCountdown: () => {
     if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
     set({ countdownRunning: false });
+    stopCountdownBackgroundMusic();
     const { countdownRemaining, countdownLabel, countdownTheme, countdownTargetTime } = get();
     if (get().countdownLive) {
       sendToOutput({
@@ -661,6 +757,7 @@ export const useStore = create<Store>((set, get) => ({
 
   resetCountdown: () => {
     if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
+    stopCountdownBackgroundMusic();
     const t = get().countdownTargetTime;
     let diffSeconds = 0;
     if (t) {
@@ -777,17 +874,22 @@ export const useStore = create<Store>((set, get) => ({
     }
   },
 
-  setMusicIndex: (i) => set({ musicIndex: i }),
-  setMusicPlaying: (p) => {
-    const fadeDuration = get().musicFadeDuration;
-    const a = ensureMusicAudio();
-    if (!a) return;
+	  setMusicIndex: (i) => set({ musicIndex: i }),
+	  setMusicPlaying: (p) => {
+	    const fadeDuration = get().musicFadeDuration;
+	    const a = ensureMusicAudio();
+	    if (!a) return;
 
-    if (p) {
-      // Fade in
-      a.volume = 0;
-      a.play().catch(() => {});
-      set({ musicPlaying: true });
+	    if (p) {
+	      const current = get().music[get().musicIndex];
+	      if (!current?.src) {
+	        set({ error: "Dieser Track kann nicht abgespielt werden (keine Audio-Quelle).", musicPlaying: false });
+	        return;
+	      }
+	      // Fade in
+	      a.volume = 0;
+	      a.play().catch(() => {});
+	      set({ musicPlaying: true });
 
       // Fade in over fadeDuration seconds
       const fadeSteps = 20;
@@ -830,23 +932,31 @@ export const useStore = create<Store>((set, get) => ({
 
   toggleMusicPlaying: () => get().setMusicPlaying(!get().musicPlaying),
 
-  playNextMusic: () => {
-    const { music, musicIndex, setMusicIndex, setMusicPlaying } = get();
-    if (music.length === 0) return;
-    const next = (musicIndex + 1) % music.length;
-    setMusicIndex(next);
-    set({ musicCurrentTime: 0 });
-    setMusicPlaying(true);
-  },
+	  playNextMusic: () => {
+	    const { music, musicIndex, setMusicIndex, setMusicPlaying } = get();
+	    if (music.length === 0) return;
+	    let next = musicIndex;
+	    for (let i = 0; i < music.length; i++) {
+	      next = (next + 1) % music.length;
+	      if (music[next]?.src) break;
+	    }
+	    setMusicIndex(next);
+	    set({ musicCurrentTime: 0 });
+	    setMusicPlaying(true);
+	  },
 
-  playPrevMusic: () => {
-    const { music, musicIndex, setMusicIndex, setMusicPlaying } = get();
-    if (music.length === 0) return;
-    const prev = (musicIndex - 1 + music.length) % music.length;
-    setMusicIndex(prev);
-    set({ musicCurrentTime: 0 });
-    setMusicPlaying(true);
-  },
+	  playPrevMusic: () => {
+	    const { music, musicIndex, setMusicIndex, setMusicPlaying } = get();
+	    if (music.length === 0) return;
+	    let prev = musicIndex;
+	    for (let i = 0; i < music.length; i++) {
+	      prev = (prev - 1 + music.length) % music.length;
+	      if (music[prev]?.src) break;
+	    }
+	    setMusicIndex(prev);
+	    set({ musicCurrentTime: 0 });
+	    setMusicPlaying(true);
+	  },
 
   seekMusic: (time) => {
     const a = ensureMusicAudio();
@@ -979,26 +1089,26 @@ export const useStore = create<Store>((set, get) => ({
     }
   },
 
-  importSpotifyPlaylist: async (playlistUri) => {
-    const { spotifyAuth } = get();
-    if (!spotifyAuth.isAuthenticated || !spotifyAuth.accessToken) {
-      throw new Error("Spotify nicht verbunden");
-    }
+	  importSpotifyPlaylist: async (playlistUri) => {
+	    try {
+	      const { spotifyAuth } = get();
 
-    try {
-      // Parse playlist ID from URI (spotify:playlist:xxxxx or URL)
-      let playlistId = playlistUri;
-      if (playlistUri.includes("playlist/")) {
-        playlistId = playlistUri.split("playlist/")[1].split("?")[0];
-      } else if (playlistUri.startsWith("spotify:playlist:")) {
-        playlistId = playlistUri.replace("spotify:playlist:", "");
-      }
+	      // Parse playlist ID from URI (spotify:playlist:xxxxx or URL)
+	      const raw = String(playlistUri || "").trim();
+	      if (!raw) throw new Error("Bitte einen Spotify Playlist-Link oder eine URI eingeben.");
+	      const playlistId = getSpotifyPlaylistId(raw);
 
-      const response = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}`, {
-        headers: {
-          Authorization: `Bearer ${spotifyAuth.accessToken}`,
-        },
-      });
+	      if (!spotifyAuth.isAuthenticated || !spotifyAuth.accessToken) throw new Error("Spotify nicht verbunden");
+
+	      if (!playlistId) {
+	        throw new Error("Konnte Playlist-ID nicht aus dem Link/der URI lesen. Bitte einen open.spotify.com/playlist/... Link oder spotify:playlist:... verwenden.");
+	      }
+
+	      const response = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}`, {
+	        headers: {
+	          Authorization: `Bearer ${spotifyAuth.accessToken}`,
+	        },
+	      });
 
       if (!response.ok) {
         throw new Error(`Spotify API Error: ${response.status}`);
@@ -1271,6 +1381,10 @@ export const useStore = create<Store>((set, get) => ({
           countdownLabel: parsed.countdownLabel ?? "Gottesdienst beginnt in",
           countdownTargetTime: parsed.countdownTargetTime ?? null,
           countdownTheme: parsed.countdownTheme ?? "minimal",
+          countdownBackgroundPlaylistId: parsed.countdownBackgroundPlaylistId ?? null,
+          countdownBackgroundMusicVolume: normalizeVolume(parsed.countdownBackgroundMusicVolume, 0.6),
+          countdownBackgroundMusicFadeStartMinutes: normalizeMinutes(parsed.countdownBackgroundMusicFadeStartMinutes, 10),
+          countdownBackgroundMusicFullVolumeMinutes: normalizeMinutes(parsed.countdownBackgroundMusicFullVolumeMinutes, 2),
           outputMonitorIndex: parsed.outputMonitorIndex ?? null,
         });
       }
@@ -1283,10 +1397,28 @@ export const useStore = create<Store>((set, get) => ({
 
   saveSettings: () => {
     try {
-      const { countdownLabel, countdownTargetTime, countdownTheme, outputMonitorIndex } = get();
+      const {
+        countdownLabel,
+        countdownTargetTime,
+        countdownTheme,
+        countdownBackgroundPlaylistId,
+        countdownBackgroundMusicVolume,
+        countdownBackgroundMusicFadeStartMinutes,
+        countdownBackgroundMusicFullVolumeMinutes,
+        outputMonitorIndex,
+      } = get();
       localStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify({ countdownLabel, countdownTargetTime, countdownTheme, outputMonitorIndex })
+        JSON.stringify({
+          countdownLabel,
+          countdownTargetTime,
+          countdownTheme,
+          countdownBackgroundPlaylistId,
+          countdownBackgroundMusicVolume,
+          countdownBackgroundMusicFadeStartMinutes,
+          countdownBackgroundMusicFullVolumeMinutes,
+          outputMonitorIndex,
+        })
       );
     } catch {
       console.warn("Could not save settings");
@@ -1299,12 +1431,8 @@ export const useStore = create<Store>((set, get) => ({
 function savePlaylists() {
   try {
     const { playlists } = useStore.getState();
-    // Don't persist Spotify-sourced playlists with full track data (too large)
-    // Instead, store playlist metadata and re-fetch on load
-    const toPersist = playlists.map((p) => ({
-      ...p,
-      tracks: p.source === "local" ? p.tracks : [], // Only persist local tracks
-    }));
+    // Persist track lists so playlists can be played back (including Spotify preview URLs).
+    const toPersist = playlists;
     localStorage.setItem(PLAYLISTS_KEY, JSON.stringify(toPersist));
   } catch {
     console.warn("Could not save playlists");

@@ -14,17 +14,28 @@ export default function CountdownTab() {
   const live = useStore((s) => s.countdownLive);
   const targetTime = useStore((s) => s.countdownTargetTime);
   const theme = useStore((s) => s.countdownTheme);
-  const backgroundMusicId = useStore((s) => s.countdownBackgroundMusicId);
-  const songs = useStore((s) => s.songs);
+  const playlists = useStore((s) => s.playlists);
+  const backgroundPlaylistId = useStore((s) => s.countdownBackgroundPlaylistId);
+  const bgVolume = useStore((s) => s.countdownBackgroundMusicVolume);
+  const fadeStartMin = useStore((s) => s.countdownBackgroundMusicFadeStartMinutes);
+  const fullMin = useStore((s) => s.countdownBackgroundMusicFullVolumeMinutes);
   const setLabel = useStore((s) => s.setCountdownLabel);
   const setTargetTime = useStore((s) => s.setCountdownTargetTime);
   const applyTargetTime = useStore((s) => s.applyCountdownTargetTime);
   const setTheme = useStore((s) => s.setCountdownTheme);
-  const setBackgroundMusic = useStore((s) => s.setCountdownBackgroundMusic);
+  const setBackgroundPlaylist = useStore((s) => s.setCountdownBackgroundPlaylist);
+  const setBgVolume = useStore((s) => s.setCountdownBackgroundMusicVolume);
+  const setFadeStartMin = useStore((s) => s.setCountdownBackgroundFadeStartMinutes);
+  const setFullMin = useStore((s) => s.setCountdownBackgroundFullVolumeMinutes);
   const start = useStore((s) => s.startCountdown);
   const setLive = useStore((s) => s.setCountdownLive);
 
   const urgent = remaining <= 10 && remaining > 0 && running;
+  const playlistOptions = playlists.map((p) => ({
+    id: p.id,
+    title: `${p.source === "spotify" ? "Spotify" : "Local"}: ${p.name} (${p.tracks.length})`,
+    artist: "",
+  }));
 
   return (
     <div className="flex flex-col h-full">
@@ -139,18 +150,69 @@ export default function CountdownTab() {
           <select
             className="w-full text-sm px-3 py-2 rounded outline-none"
             style={{ background: "#141414", border: "1px solid #252525", color: "#ddd" }}
-            value={backgroundMusicId ?? ""}
-            onChange={(e) => setBackgroundMusic(e.target.value || null)}
+            value={backgroundPlaylistId ?? ""}
+            onChange={(e) => setBackgroundPlaylist(e.target.value || null)}
           >
             <option value="">Keine Musik</option>
-            {songs.map((song) => (
+            {playlistOptions.map((song) => (
               <option key={song.id} value={song.id}>
                 {song.title} {song.artist ? `— ${song.artist}` : ""}
               </option>
             ))}
           </select>
+          <div className="grid grid-cols-3 gap-2 mt-3">
+            <div>
+              <label className="text-[11px] block mb-1" style={{ color: "#666" }}>
+                Lautstaerke
+              </label>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={bgVolume}
+                onChange={(e) => setBgVolume(Number(e.target.value))}
+                className="w-full"
+              />
+              <div className="text-[11px]" style={{ color: "#555" }}>
+                {Math.round(bgVolume * 100)}%
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] block mb-1" style={{ color: "#666" }}>
+                Fade ab (min)
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={240}
+                value={fadeStartMin}
+                onChange={(e) => setFadeStartMin(Number(e.target.value))}
+                className="w-full text-sm px-2 py-2 rounded outline-none"
+                style={{ background: "#141414", border: "1px solid #252525", color: "#ddd" }}
+              />
+            </div>
+
+            <div>
+              <label className="text-[11px] block mb-1" style={{ color: "#666" }}>
+                100% fuer (min)
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={240}
+                value={fullMin}
+                onChange={(e) => setFullMin(Number(e.target.value))}
+                className="w-full text-sm px-2 py-2 rounded outline-none"
+                style={{ background: "#141414", border: "1px solid #252525", color: "#ddd" }}
+              />
+            </div>
+          </div>
+
           <p className="text-[11px] mt-2" style={{ color: "#555" }}>
-            Die Musik wird automatisch so gestartet, dass sie genau bei 0:00 endet.
+            Startet stumm und blendet ab <span style={{ color: "#bbb" }}>{fadeStartMin}</span> min vor 0:00 bis auf 100% ein.
+            Die letzten <span style={{ color: "#bbb" }}>{fullMin}</span> min laeuft sie auf 100%. Stoppt bei 0:00.
           </p>
         </div>
 

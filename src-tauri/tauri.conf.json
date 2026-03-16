@@ -28,7 +28,7 @@
         "enable": true,
         "scope": ["**"]
       },
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src https://fonts.gstatic.com; img-src 'self' asset: http://asset.localhost https://asset.localhost data: blob: file: http://asset.localhost https://asset.localhost https://tauri.localhost; media-src 'self' asset: http://asset.localhost https://asset.localhost data: blob: file: http://asset.localhost https://asset.localhost https://tauri.localhost"
+      "csp": "default-src 'self'; connect-src 'self' https://accounts.spotify.com https://api.spotify.com; script-src 'self'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src https://fonts.gstatic.com; img-src 'self' asset: http://asset.localhost https://asset.localhost data: blob: file: http://asset.localhost https://asset.localhost https://tauri.localhost https://i.scdn.co https://*.scdn.co https://*.spotifycdn.com; media-src 'self' asset: http://asset.localhost https://asset.localhost data: blob: file: http://asset.localhost https://asset.localhost https://tauri.localhost https://*.scdn.co https://*.spotifycdn.com"
     }
   },
   "bundle": {

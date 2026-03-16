@@ -36,12 +36,32 @@ export default function MusicTab() {
 	  const [spotifyClientIdInput, setSpotifyClientIdInput] = useState(() =>
 	    resolveSpotifyClientId(import.meta.env.VITE_SPOTIFY_CLIENT_ID)
 	  );
-	  const [spotifyPlaylistUri, setSpotifyPlaylistUri] = useState("");
-	
-	  const current = music[musicIndex];
-	  const spotifyRedirectUri = `http://127.0.0.1:${Number(import.meta.env.VITE_SPOTIFY_AUTH_PORT) || 8080}/callback`;
-	  const dragIndex = useStore((s) => (s as any).dragIndex ?? -1);
-	  const setDragIndex = (i: number) => (useStore as any).setState({ dragIndex: i });
+  const [spotifyPlaylistUri, setSpotifyPlaylistUri] = useState("");
+
+  const current = music[musicIndex];
+  const activePlaylist = activePlaylistId ? playlists.find((p) => p.id === activePlaylistId) : null;
+  const spotifyRedirectUri = `http://127.0.0.1:${Number(import.meta.env.VITE_SPOTIFY_AUTH_PORT) || 8080}/callback`;
+  const dragIndex = useStore((s) => (s as any).dragIndex ?? -1);
+  const setDragIndex = (i: number) => (useStore as any).setState({ dragIndex: i });
+
+	  async function openExternal(url: string) {
+	    try {
+	      const { openUrl } = await import("@tauri-apps/plugin-opener");
+	      await openUrl(url);
+    } catch {
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  }
+
+	  async function openSpotifyDashboard() {
+	    const url = "https://developer.spotify.com/dashboard/applications";
+	    try {
+	      const { openUrl } = await import("@tauri-apps/plugin-opener");
+	      await openUrl(url);
+	    } catch {
+	      window.open(url, "_blank", "noopener,noreferrer");
+	    }
+	  }
 
   function handleDragStart(e: React.DragEvent, index: number) {
     e.dataTransfer.setData("text/plain", index.toString());
@@ -109,7 +129,7 @@ export default function MusicTab() {
       setSpotifyPlaylistUri("");
     } catch (err) {
       console.error("Failed to import playlist:", err);
-      alert("Fehler beim Importieren der Playlist. Ist die URI korrekt?");
+      setError(`Fehler beim Hinzufügen der Playlist: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -137,6 +157,17 @@ export default function MusicTab() {
               </option>
             ))}
           </select>
+
+          {activePlaylist?.source === "spotify" && activePlaylist.spotifyUri && (
+            <button
+              onClick={() => openExternal(activePlaylist.spotifyUri!)}
+              className="text-xs px-2 py-1 rounded font-medium"
+              style={{ background: "#1DB95420", color: "#1DB954", border: "1px solid #1DB95440" }}
+              title="Playlist in Spotify öffnen"
+            >
+              Öffnen
+            </button>
+          )}
         </div>
         
         <div className="flex items-center gap-2">
@@ -145,18 +176,13 @@ export default function MusicTab() {
             <button
               onClick={() => setShowSpotifyModal(true)}
               className="text-xs px-3 py-1.5 rounded font-medium flex items-center gap-1"
-	                  style={{
-	                    background: "#1DB954",
-	                    color: "white",
-	                    opacity: (!spotifyClientIdInput.trim() && !resolveSpotifyClientId(import.meta.env.VITE_SPOTIFY_CLIENT_ID)) ? 0.6 : 1,
-	                  }}
+              style={{ background: "#1DB954", color: "white" }}
             >
               🟢 Spotify
             </button>
           ) : (
             <button
-	                  onClick={handleConnectSpotify}
-	                  disabled={!spotifyClientIdInput.trim() && !resolveSpotifyClientId(import.meta.env.VITE_SPOTIFY_CLIENT_ID)}
+              onClick={() => setShowSpotifyModal(true)}
               className="text-xs px-3 py-1.5 rounded font-medium flex items-center gap-1"
               style={{ background: "#1DB954", color: "white" }}
             >
@@ -409,9 +435,9 @@ export default function MusicTab() {
 
             {spotifyAuth.isAuthenticated ? (
               <>
-                <p className="text-sm text-gray-300 mb-4">
+			                <div className="text-sm text-gray-300 mb-4">
                   ✅ Mit Spotify verbunden. Importiere Playlists mit URI oder Link.
-                </p>
+			                </div>
 
                 <div className="mb-4">
                   <label className="text-xs text-gray-400 block mb-1">Spotify Playlist URI/Link</label>
@@ -440,20 +466,71 @@ export default function MusicTab() {
                   Trennen
                 </button>
               </>
-	            ) : (
-	              <>
-	                <div className="mb-4">
-	                  <label className="text-xs text-gray-400 block mb-1">Spotify Client ID</label>
-	                  <input
+		            ) : (
+		              <>
+			                {false && (<p className="text-sm text-gray-300 mb-4">
+		                  Füge eine Spotify-Playlist als Link/URI hinzu. Ohne Login kann OpenStage die Tracks nicht importieren –
+		                  aber du bekommst unten eine eingebettete Vorschau (Trackliste + Preview).
+			                </p>)}
+
+			                {false && (<div className="mb-4">
+		                  <label className="text-xs text-gray-400 block mb-1">Spotify Playlist URI/Link</label>
+		                  <input
+		                    type="text"
+		                    value={spotifyPlaylistUri}
+		                    onChange={(e) => setSpotifyPlaylistUri(e.target.value)}
+		                    placeholder="spotify:playlist:... oder https://open.spotify.com/playlist/..."
+		                    className="w-full px-3 py-2 rounded bg-[#0a0a0a] text-white border border-[#333] text-sm"
+		                  />
+			                </div>)}
+
+			                {false && (<button
+		                  onClick={handleImportSpotifyPlaylist}
+		                  className="w-full mb-4 px-4 py-2 rounded text-sm font-medium"
+		                  style={{ background: "#1DB954", color: "white" }}
+		                >
+		                  Playlist-Link hinzufügen
+			                </button>)}
+
+			                {false && (
+		                  <div className="mb-4">
+		                    <div className="text-xs text-gray-400 mb-2">Vorschau</div>
+		                    <div className="rounded overflow-hidden border border-[#333]" style={{ background: "#0a0a0a" }}>
+		                      <iframe
+		                        title="Spotify Playlist Preview"
+			                        src=""
+		                        width="100%"
+		                        height="152"
+		                        frameBorder={0}
+		                        allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+		                        loading="lazy"
+		                      />
+		                    </div>
+		                  </div>
+		                )}
+
+			                <div className="mb-4">
+		                <div className="mb-4">
+		                  <label className="text-xs text-gray-400 block mb-1">Spotify Client ID</label>
+		                  <input
 	                    type="text"
 	                    value={spotifyClientIdInput}
 	                    onChange={(e) => setSpotifyClientIdInput(e.target.value)}
 	                    placeholder="z.B. 0123456789abcdef0123456789abcdef"
 	                    className="w-full px-3 py-2 rounded bg-[#0a0a0a] text-white border border-[#333] text-sm"
 	                  />
-	                  <p className="text-[11px] text-gray-500 mt-2">
-	                    Du findest die Client ID im Spotify Developer Dashboard (App → Settings).
-	                  </p>
+	                  <div className="flex items-center justify-between gap-2 mt-2">
+	                    <p className="text-[11px] text-gray-500">
+	                      Du findest die Client ID im Spotify Developer Dashboard (App → Settings).
+	                    </p>
+	                    <button
+	                      onClick={openSpotifyDashboard}
+	                      className="text-[11px] underline"
+	                      style={{ color: "#1DB954" }}
+	                    >
+	                      Dashboard (Apps) öffnen
+	                    </button>
+	                  </div>
 	                </div>
 
 	                <div className="mb-4">
@@ -493,6 +570,8 @@ export default function MusicTab() {
                 >
                   🟢 Mit Spotify verbinden
                 </button>
+
+			                </div>
 
                 <button
                   onClick={() => setShowSpotifyModal(false)}

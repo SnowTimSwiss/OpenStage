@@ -90,32 +90,12 @@ fn find_libreoffice() -> Option<PathBuf> {
 #[tauri::command]
 fn check_libreoffice_installed() -> LibreOfficeStatus {
     if let Some(path) = find_libreoffice() {
-        // Try to get version (without showing console window on Windows)
-        let version = {
-            let mut cmd = std::process::Command::new(&path);
-            cmd.arg("--version");
-            
-            // Hide console window on Windows
-            #[cfg(target_os = "windows")]
-            {
-                use std::os::windows::process::CommandExt;
-                const CREATE_NO_WINDOW: u32 = 0x08000000;
-                cmd.creation_flags(CREATE_NO_WINDOW);
-            }
-            
-            cmd.output()
-                .ok()
-                .and_then(|output| {
-                    String::from_utf8(output.stdout)
-                        .ok()
-                        .map(|v| v.trim().to_string())
-                })
-        };
-
         LibreOfficeStatus {
             installed: true,
             path: Some(path.to_string_lossy().to_string()),
-            version,
+            // Running `soffice --version` can block or pop up a console on some Windows installs.
+            // We only need to know whether it's present; version is optional.
+            version: None,
         }
     } else {
         LibreOfficeStatus {
