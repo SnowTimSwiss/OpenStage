@@ -7,6 +7,7 @@ import SongsTab from "./tabs/SongsTab";
 import CountdownTab from "./tabs/CountdownTab";
 import MusicTab from "./tabs/MusicTab";
 import DisplayTab from "./tabs/DisplayTab";
+import MusicOverlay from "./MusicOverlay";
 
 export default function OperatorApp() {
 	  const activeTab = useStore((s) => s.activeTab);
@@ -49,6 +50,7 @@ export default function OperatorApp() {
         {/* Preview panel */}
         <PreviewPanel />
       </div>
+      <MusicOverlay />
     </div>
   );
 }
@@ -58,17 +60,20 @@ function PreviewPanel() {
   const isBlackout = useStore((s) => s.isBlackout);
   const activeSongId = useStore((s) => s.activeSongId);
   const activeSongSlide = useStore((s) => s.activeSongSlide);
-  const songs = useStore((s) => s.songs);
-  const activeSlideId = useStore((s) => s.activeSlideId);
-  const slides = useStore((s) => s.slides);
-  const countdownRemaining = useStore((s) => s.countdownRemaining);
-  const countdownLabel = useStore((s) => s.countdownLabel);
-  const activeVideoId = useStore((s) => s.activeVideoId);
-  const videos = useStore((s) => s.videos);
+	  const songs = useStore((s) => s.songs);
+	  const activeSlideId = useStore((s) => s.activeSlideId);
+	  const slides = useStore((s) => s.slides);
+	  const pptxGroups = useStore((s) => s.pptxGroups);
+	  const countdownRemaining = useStore((s) => s.countdownRemaining);
+	  const countdownLabel = useStore((s) => s.countdownLabel);
+	  const activeVideoId = useStore((s) => s.activeVideoId);
+	  const videos = useStore((s) => s.videos);
 
-  const activeSong = songs.find((s) => s.id === activeSongId);
-  const activeSlide = slides.find((s) => s.id === activeSlideId);
-  const activeVideo = videos.find((v) => v.id === activeVideoId);
+	  const activeSong = songs.find((s) => s.id === activeSongId);
+	  const activeSlide =
+	    slides.find((s) => s.id === activeSlideId) ??
+	    pptxGroups.flatMap((g) => g.slides).find((s) => s.id === activeSlideId);
+	  const activeVideo = videos.find((v) => v.id === activeVideoId);
 
   function formatTime(s: number) {
     const m = Math.floor(s / 60);

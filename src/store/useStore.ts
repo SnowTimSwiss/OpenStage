@@ -11,6 +11,8 @@ import type {
 const STORAGE_KEY = "openstage-settings-v1";
 
 let countdownInterval: ReturnType<typeof setInterval> | null = null;
+let musicAudio: HTMLAudioElement | null = null;
+let musicAudioSrc: string | null = null;
 
 function formatUnknownError(err: unknown): string {
   if (err instanceof Error) return `${err.name}: ${err.message}`;
@@ -25,6 +27,24 @@ function formatUnknownError(err: unknown): string {
     }
   }
   return String(err);
+}
+
+function isOutputWebview(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return new URLSearchParams(window.location.search).get("window") === "output";
+  } catch {
+    return false;
+  }
+}
+
+function ensureMusicAudio(): HTMLAudioElement | null {
+  if (typeof window === "undefined") return null;
+  if (isOutputWebview()) return null; // prevent double audio in output window
+  if (musicAudio) return musicAudio;
+  musicAudio = new Audio();
+  musicAudio.preload = "metadata";
+  return musicAudio;
 }
 
 interface Store {
@@ -101,14 +121,22 @@ interface Store {
   removeVideo: (id: string) => void;
 
   // ── Music ──────────────────────────────────────────────────────────────
-  music: MusicItem[];
-  musicIndex: number;
-  musicPlaying: boolean;
-  loadMusic: () => Promise<void>;
-  setMusicIndex: (i: number) => void;
-  setMusicPlaying: (p: boolean) => void;
-  reorderMusic: (fromIndex: number, toIndex: number) => void;
-  removeMusic: (id: string) => void;
+	  music: MusicItem[];
+	  musicIndex: number;
+	  musicPlaying: boolean;
+	  musicVolume: number; // 0..1
+	  musicCurrentTime: number; // seconds
+	  musicDuration: number; // seconds
+	  loadMusic: () => Promise<void>;
+	  setMusicIndex: (i: number) => void;
+	  setMusicPlaying: (p: boolean) => void;
+	  toggleMusicPlaying: () => void;
+	  playNextMusic: () => void;
+	  playPrevMusic: () => void;
+	  seekMusic: (time: number) => void;
+	  setMusicVolume: (v: number) => void;
+	  reorderMusic: (fromIndex: number, toIndex: number) => void;
+	  removeMusic: (id: string) => void;
 
   // ── Display ────────────────────────────────────────────────────────────
   monitors: Monitor[];
@@ -536,9 +564,12 @@ export const useStore = create<Store>((set, get) => ({
     set((s) => ({ videos: s.videos.filter((x) => x.id !== id) })),
 
   // ── Music ──────────────────────────────────────────────────────────────
-  music: [],
-  musicIndex: 0,
-  musicPlaying: false,
+	  music: [],
+	  musicIndex: 0,
+	  musicPlaying: false,
+	  musicVolume: 1,
+	  musicCurrentTime: 0,
+	  musicDuration: 0,
 
   loadMusic: async () => {
     const { setLoading, setError, clearError } = get();
@@ -565,8 +596,54 @@ export const useStore = create<Store>((set, get) => ({
     }
   },
 
-  setMusicIndex: (i) => set({ musicIndex: i }),
-  setMusicPlaying: (p) => set({ musicPlaying: p }),
+	  setMusicIndex: (i) => set({ musicIndex: i }),
+	  setMusicPlaying: (p) => {
+	    set({ musicPlaying: p });
+	    const a = ensureMusicAudio();
+	    if (!a) return;
+	    if (p) a.play().catch(() => {});
+	    else a.pause();
+	  },
+
+	  toggleMusicPlaying: () => get().setMusicPlaying(!get().musicPlaying),
+
+	  playNextMusic: () => {
+	    const { music, musicIndex, setMusicIndex, setMusicPlaying } = get();
+	    if (music.length === 0) return;
+	    const next = (musicIndex + 1) % music.length;
+	    setMusicIndex(next);
+	    set({ musicCurrentTime: 0 });
+	    setMusicPlaying(true);
+	  },
+
+	  playPrevMusic: () => {
+	    const { music, musicIndex, setMusicIndex, setMusicPlaying } = get();
+	    if (music.length === 0) return;
+	    const prev = (musicIndex - 1 + music.length) % music.length;
+	    setMusicIndex(prev);
+	    set({ musicCurrentTime: 0 });
+	    setMusicPlaying(true);
+	  },
+
+	  seekMusic: (time) => {
+	    const a = ensureMusicAudio();
+	    const t = Number.isFinite(time) ? Math.max(0, time) : 0;
+	    set({ musicCurrentTime: t });
+	    if (a) {
+	      try {
+	        a.currentTime = t;
+	      } catch {
+	        // ignore
+	      }
+	    }
+	  },
+
+	  setMusicVolume: (v) => {
+	    const vol = Math.max(0, Math.min(1, v));
+	    set({ musicVolume: vol });
+	    const a = ensureMusicAudio();
+	    if (a) a.volume = vol;
+	  },
 
   reorderMusic: (fromIndex: number, toIndex: number) => {
     set((s) => {
@@ -586,12 +663,30 @@ export const useStore = create<Store>((set, get) => ({
     });
   },
 
-  removeMusic: (id) =>
-    set((s) => ({
-      music: s.music.filter((x) => x.id !== id),
-      musicIndex: 0,
-      musicPlaying: false,
-    })),
+	  removeMusic: (id) =>
+	    set((s) => {
+	      const nextMusic = s.music.filter((x) => x.id !== id);
+	      const wasPlaying = s.musicPlaying;
+	      if (nextMusic.length === 0) {
+	        const a = ensureMusicAudio();
+	        if (a) a.pause();
+	        return {
+	          music: [],
+	          musicIndex: 0,
+	          musicPlaying: false,
+	          musicCurrentTime: 0,
+	          musicDuration: 0,
+	        };
+	      }
+
+	      // Keep index in range.
+	      const nextIndex = Math.min(s.musicIndex, nextMusic.length - 1);
+	      if (wasPlaying && nextIndex !== s.musicIndex) {
+	        // track changed; currentTime will be reset by engine sync
+	      }
+
+	      return { music: nextMusic, musicIndex: nextIndex };
+	    }),
 
   // ── Display ──────────────────────────────────────────────────────────────
   monitors: [],
@@ -684,14 +779,87 @@ export const useStore = create<Store>((set, get) => ({
 	  },
 }));
 
+function initMusicEngine() {
+  const a = ensureMusicAudio();
+  if (!a) return;
+
+  const syncFromState = () => {
+    const s = useStore.getState();
+    const current = s.music[s.musicIndex];
+
+    // Source
+    const nextSrc = current?.src ?? "";
+    if (nextSrc && musicAudioSrc !== nextSrc) {
+      a.src = nextSrc;
+      musicAudioSrc = nextSrc;
+      try {
+        a.currentTime = 0;
+      } catch {
+        // ignore
+      }
+      useStore.setState({ musicCurrentTime: 0, musicDuration: 0 });
+      if (s.musicPlaying && a.paused) a.play().catch(() => {});
+    }
+
+    // Volume
+    if (Number.isFinite(s.musicVolume) && a.volume !== s.musicVolume) {
+      a.volume = s.musicVolume;
+    }
+
+    // Play state
+    if (s.musicPlaying) {
+      if (a.paused) a.play().catch(() => {});
+    } else if (!a.paused) {
+      a.pause();
+    }
+  };
+
+  a.addEventListener("timeupdate", () => {
+    useStore.setState({ musicCurrentTime: a.currentTime });
+  });
+
+  a.addEventListener("loadedmetadata", () => {
+    useStore.setState({ musicDuration: Number.isFinite(a.duration) ? a.duration : 0 });
+  });
+
+  a.addEventListener("play", () => {
+    useStore.setState({ musicPlaying: true });
+  });
+
+  a.addEventListener("pause", () => {
+    useStore.setState({ musicPlaying: false });
+  });
+
+  a.addEventListener("ended", () => {
+    useStore.getState().playNextMusic();
+  });
+
+  // Initial sync + keep in sync
+  syncFromState();
+  useStore.subscribe(syncFromState);
+}
+
 // Auto-save settings on changes
-useStore.subscribe((state) => {
-  state.saveSettings();
+useStore.subscribe((state, prevState) => {
+  if (!prevState) {
+    state.saveSettings();
+    return;
+  }
+
+  const changed =
+    state.countdownDuration !== prevState.countdownDuration ||
+    state.countdownLabel !== prevState.countdownLabel ||
+    state.countdownTargetTime !== prevState.countdownTargetTime ||
+    state.countdownTheme !== prevState.countdownTheme ||
+    state.outputMonitorIndex !== prevState.outputMonitorIndex;
+
+  if (changed) state.saveSettings();
 });
 
 // Load settings on init
 (() => {
   if (typeof window !== "undefined") {
     useStore.getState().loadSettings();
+    initMusicEngine();
   }
 })();

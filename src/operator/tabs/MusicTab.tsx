@@ -1,17 +1,22 @@
-import { useEffect, useRef } from "react";
 import { useStore } from "../../store/useStore";
 
 export default function MusicTab() {
   const music = useStore((s) => s.music);
   const musicIndex = useStore((s) => s.musicIndex);
   const musicPlaying = useStore((s) => s.musicPlaying);
+  const musicCurrentTime = useStore((s) => s.musicCurrentTime);
+  const musicDuration = useStore((s) => s.musicDuration);
+  const musicVolume = useStore((s) => s.musicVolume);
   const loadMusic = useStore((s) => s.loadMusic);
   const setMusicIndex = useStore((s) => s.setMusicIndex);
   const setMusicPlaying = useStore((s) => s.setMusicPlaying);
+  const playNextMusic = useStore((s) => s.playNextMusic);
+  const playPrevMusic = useStore((s) => s.playPrevMusic);
+  const seekMusic = useStore((s) => s.seekMusic);
+  const setMusicVolume = useStore((s) => s.setMusicVolume);
   const removeMusic = useStore((s) => s.removeMusic);
   const reorderMusic = useStore((s) => s.reorderMusic);
 
-  const audioRef = useRef<HTMLAudioElement>(null);
   const current = music[musicIndex];
   const dragIndex = useStore((s) => (s as any).dragIndex ?? -1);
   const setDragIndex = (i: number) => (useStore as any).setState({ dragIndex: i });
@@ -40,29 +45,11 @@ export default function MusicTab() {
     setDragIndex(-1);
   }
 
-  useEffect(() => {
-    if (!audioRef.current || !current) return;
-    audioRef.current.src = current.src;
-    if (musicPlaying) audioRef.current.play().catch(() => {});
-    else audioRef.current.pause();
-  }, [musicIndex, current]);
-
-  useEffect(() => {
-    if (!audioRef.current) return;
-    if (musicPlaying) audioRef.current.play().catch(() => {});
-    else audioRef.current.pause();
-  }, [musicPlaying]);
-
-  function playNext() {
-    const next = (musicIndex + 1) % music.length;
-    setMusicIndex(next);
-    setMusicPlaying(true);
-  }
-
-  function playPrev() {
-    const prev = (musicIndex - 1 + music.length) % music.length;
-    setMusicIndex(prev);
-    setMusicPlaying(true);
+  function formatTime(s: number) {
+    if (!Number.isFinite(s) || s < 0) return "00:00";
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
   }
 
   return (
@@ -78,14 +65,6 @@ export default function MusicTab() {
         </button>
       </div>
 
-      {/* Hidden audio element */}
-      <audio
-        ref={audioRef}
-        onEnded={playNext}
-        onPlay={() => setMusicPlaying(true)}
-        onPause={() => setMusicPlaying(false)}
-      />
-
       {/* Player */}
       {current && (
         <div className="px-4 py-4 border-b" style={{ borderColor: "#252525", background: "#0d0d0d" }}>
@@ -96,9 +75,37 @@ export default function MusicTab() {
               {musicIndex + 1} / {music.length}
             </div>
           </div>
+
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-[11px] font-mono" style={{ color: "#666" }}>{formatTime(musicCurrentTime)}</span>
+            <input
+              type="range"
+              min={0}
+              max={Math.max(1, musicDuration || 0)}
+              step={0.25}
+              value={Math.min(musicCurrentTime, musicDuration || musicCurrentTime)}
+              onChange={(e) => seekMusic(Number(e.target.value))}
+              className="flex-1"
+            />
+            <span className="text-[11px] font-mono" style={{ color: "#666" }}>{formatTime(musicDuration)}</span>
+          </div>
+
+          <div className="flex items-center justify-center gap-3 mb-3">
+            <span className="text-[11px]" style={{ color: "#555" }}>Vol</span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={musicVolume}
+              onChange={(e) => setMusicVolume(Number(e.target.value))}
+              className="w-40"
+            />
+          </div>
+
           <div className="flex items-center justify-center gap-4">
             <button
-              onClick={playPrev}
+              onClick={playPrevMusic}
               className="w-9 h-9 rounded-full flex items-center justify-center text-sm"
               style={{ background: "#1a1a1a", color: "#888" }}
             >
@@ -116,7 +123,7 @@ export default function MusicTab() {
               {musicPlaying ? "⏸" : "▶"}
             </button>
             <button
-              onClick={playNext}
+              onClick={playNextMusic}
               className="w-9 h-9 rounded-full flex items-center justify-center text-sm"
               style={{ background: "#1a1a1a", color: "#888" }}
             >
