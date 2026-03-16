@@ -308,6 +308,8 @@ interface Store {
   musicDuration: number;
   musicFadeDuration: number; // seconds for fade in/out
   loadMusic: () => Promise<void>;
+  loadMusicFromFolder: () => Promise<void>;
+  resetAllMusic: () => void;
   setMusicIndex: (i: number) => void;
   setMusicPlaying: (p: boolean) => void;
   toggleMusicPlaying: () => void;
@@ -871,6 +873,76 @@ export const useStore = create<Store>((set, get) => ({
       setError(err instanceof Error ? err.message : "Fehler beim Laden der Musik");
     } finally {
       setLoading(false);
+    }
+  },
+
+  loadMusicFromFolder: async () => {
+    const { setLoading, setError, clearError } = get();
+    try {
+      setLoading(true);
+      clearError();
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const folder = await open({
+        multiple: false,
+        directory: true,
+        title: "Musik-Ordner auswählen",
+      });
+      if (!folder) return;
+
+      const { readDir } = await import("@tauri-apps/plugin-fs");
+      const audioExts = new Set(["mp3", "wav", "ogg", "flac", "aac", "m4a"]);
+      
+      const entries = await readDir(folder as string);
+      const audioFiles = entries.filter((entry) => {
+        if (!entry.isFile) return false;
+        const ext = entry.name.split(".").pop()?.toLowerCase() || "";
+        return audioExts.has(ext);
+      });
+
+      const items: MusicItem[] = audioFiles.map((entry) => {
+        const fullPath = `${folder}/${entry.name}`;
+        return {
+          id: crypto.randomUUID(),
+          name: entry.name,
+          path: fullPath,
+          src: convertFileSrc(fullPath),
+          source: "local" as MusicSource,
+        };
+      });
+
+      // Sort alphabetically by name
+      items.sort((a, b) => a.name.localeCompare(b.name));
+      set((s) => ({ music: [...s.music, ...items] }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Fehler beim Laden des Ordners");
+    } finally {
+      setLoading(false);
+    }
+  },
+
+  resetAllMusic: () => {
+    const a = ensureMusicAudio();
+    if (a) {
+      try {
+        a.pause();
+        a.src = "";
+      } catch {
+        // ignore
+      }
+    }
+    set({
+      music: [],
+      musicIndex: 0,
+      musicPlaying: false,
+      musicCurrentTime: 0,
+      musicDuration: 0,
+      playlists: [],
+      activePlaylistId: null,
+    });
+    try {
+      localStorage.removeItem(PLAYLISTS_KEY);
+    } catch {
+      // ignore
     }
   },
 

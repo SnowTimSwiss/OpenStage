@@ -15,6 +15,8 @@ export default function MusicTab() {
   const spotifyAuth = useStore((s) => s.spotifyAuth);
   
   const loadMusic = useStore((s) => s.loadMusic);
+  const loadMusicFromFolder = useStore((s) => s.loadMusicFromFolder);
+  const resetAllMusic = useStore((s) => s.resetAllMusic);
   const setMusicIndex = useStore((s) => s.setMusicIndex);
   const setMusicPlaying = useStore((s) => s.setMusicPlaying);
   const playNextMusic = useStore((s) => s.playNextMusic);
@@ -37,6 +39,7 @@ export default function MusicTab() {
 	    resolveSpotifyClientId(import.meta.env.VITE_SPOTIFY_CLIENT_ID)
 	  );
   const [spotifyPlaylistUri, setSpotifyPlaylistUri] = useState("");
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   const current = music[musicIndex];
   const activePlaylist = activePlaylistId ? playlists.find((p) => p.id === activePlaylistId) : null;
@@ -198,14 +201,33 @@ export default function MusicTab() {
           >
             + Playlist
           </button>
-          
+
           {/* Add Music Button */}
           <button
             onClick={loadMusic}
             className="text-xs px-3 py-1.5 rounded font-medium"
             style={{ background: "#f97316", color: "white" }}
           >
-            + Hinzufügen
+            + Dateien
+          </button>
+
+          {/* Add Folder Button */}
+          <button
+            onClick={loadMusicFromFolder}
+            className="text-xs px-3 py-1.5 rounded font-medium"
+            style={{ background: "#f97316", color: "white" }}
+          >
+            + Ordner
+          </button>
+
+          {/* Reset All Button */}
+          <button
+            onClick={() => setShowResetConfirm(true)}
+            className="text-xs px-3 py-1.5 rounded font-medium"
+            style={{ background: "#252525", color: "#ef4444" }}
+            title="Alle Songs und Playlists zurücksetzen"
+          >
+            🗑 Reset
           </button>
         </div>
       </div>
@@ -582,6 +604,51 @@ export default function MusicTab() {
                 </button>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Reset Confirmation Modal */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-[#1a1a1a] rounded-lg p-6 w-96 border border-[#333]">
+            <div className="flex items-center gap-3 mb-4">
+              <span className="text-2xl">🗑</span>
+              <h3 className="text-lg font-semibold text-white">Alles zurücksetzen</h3>
+            </div>
+
+            <p className="text-sm text-gray-300 mb-2">
+              Bist du sicher? Dies wird löschen:
+            </p>
+            <ul className="text-sm text-gray-400 mb-6 list-disc list-inside space-y-1">
+              <li>Alle geladenen Songs</li>
+              <li>Alle Playlists (inklusive Spotify-Playlists)</li>
+              <li>Die aktuelle Musik-Wiedergabe</li>
+            </ul>
+
+            <p className="text-xs text-red-400 mb-4">
+              ⚠️ Diese Aktion kann nicht rückgängig gemacht werden.
+            </p>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  resetAllMusic();
+                  setShowResetConfirm(false);
+                }}
+                className="flex-1 px-4 py-2 rounded text-sm font-medium"
+                style={{ background: "#ef4444", color: "white" }}
+              >
+                Ja, alles löschen
+              </button>
+              <button
+                onClick={() => setShowResetConfirm(false)}
+                className="flex-1 px-4 py-2 rounded text-sm font-medium"
+                style={{ background: "#252525", color: "#aaa" }}
+              >
+                Abbrechen
+              </button>
+            </div>
           </div>
         </div>
       )}
