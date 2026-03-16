@@ -10,18 +10,20 @@ pub struct Monitor {
 }
 
 #[tauri::command]
-fn get_monitors(app: tauri::AppHandle) -> Vec<Monitor> {
-    app.available_monitors()
-        .unwrap_or_default()
-        .iter()
-        .map(|m| Monitor {
-            name: m.name().unwrap_or("Unknown").to_string(),
-            width: m.size().width,
-            height: m.size().height,
-            x: m.position().x,
-            y: m.position().y,
-        })
-        .collect()
+fn get_monitors(app: tauri::AppHandle) -> Result<Vec<Monitor>, String> {
+    match app.available_monitors() {
+        Ok(monitors) => Ok(monitors
+            .iter()
+            .map(|m| Monitor {
+                name: m.name().unwrap_or("Unknown").to_string(),
+                width: m.size().width,
+                height: m.size().height,
+                x: m.position().x,
+                y: m.position().y,
+            })
+            .collect()),
+        Err(e) => Err(format!("Failed to get monitors: {}", e)),
+    }
 }
 
 pub fn run() {

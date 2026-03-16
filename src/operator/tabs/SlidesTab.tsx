@@ -6,6 +6,34 @@ export default function SlidesTab() {
   const loadSlides = useStore((s) => s.loadSlides);
   const goLiveSlide = useStore((s) => s.goLiveSlide);
   const removeSlide = useStore((s) => s.removeSlide);
+  const reorderSlides = useStore((s) => s.reorderSlides);
+
+  const dragIndex = useStore((s) => (s as any).dragIndex ?? -1);
+  const setDragIndex = (i: number) => (useStore as any).setState({ dragIndex: i });
+
+  function handleDragStart(e: React.DragEvent, index: number) {
+    e.dataTransfer.setData("text/plain", index.toString());
+    e.dataTransfer.effectAllowed = "move";
+    setDragIndex(index);
+  }
+
+  function handleDragOver(e: React.DragEvent, index: number) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  }
+
+  function handleDrop(e: React.DragEvent, toIndex: number) {
+    e.preventDefault();
+    const fromIndex = Number(e.dataTransfer.getData("text/plain"));
+    if (!isNaN(fromIndex) && fromIndex !== toIndex) {
+      reorderSlides(fromIndex, toIndex);
+    }
+    setDragIndex(-1);
+  }
+
+  function handleDragEnd() {
+    setDragIndex(-1);
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -38,10 +66,16 @@ export default function SlidesTab() {
               return (
                 <div
                   key={slide.id}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, i)}
+                  onDragOver={(e) => handleDragOver(e, i)}
+                  onDrop={(e) => handleDrop(e, i)}
+                  onDragEnd={handleDragEnd}
                   className="relative group rounded-lg overflow-hidden cursor-pointer transition-all"
                   style={{
                     border: active ? "2px solid #f97316" : "2px solid #252525",
                     boxShadow: active ? "0 0 16px #f9731640" : "none",
+                    opacity: dragIndex === i ? 0.5 : 1,
                   }}
                   onClick={() => goLiveSlide(slide.id)}
                 >

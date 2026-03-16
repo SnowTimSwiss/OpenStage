@@ -9,9 +9,36 @@ export default function MusicTab() {
   const setMusicIndex = useStore((s) => s.setMusicIndex);
   const setMusicPlaying = useStore((s) => s.setMusicPlaying);
   const removeMusic = useStore((s) => s.removeMusic);
+  const reorderMusic = useStore((s) => s.reorderMusic);
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const current = music[musicIndex];
+  const dragIndex = useStore((s) => (s as any).dragIndex ?? -1);
+  const setDragIndex = (i: number) => (useStore as any).setState({ dragIndex: i });
+
+  function handleDragStart(e: React.DragEvent, index: number) {
+    e.dataTransfer.setData("text/plain", index.toString());
+    e.dataTransfer.effectAllowed = "move";
+    setDragIndex(index);
+  }
+
+  function handleDragOver(e: React.DragEvent, index: number) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  }
+
+  function handleDrop(e: React.DragEvent, toIndex: number) {
+    e.preventDefault();
+    const fromIndex = Number(e.dataTransfer.getData("text/plain"));
+    if (!isNaN(fromIndex) && fromIndex !== toIndex) {
+      reorderMusic(fromIndex, toIndex);
+    }
+    setDragIndex(-1);
+  }
+
+  function handleDragEnd() {
+    setDragIndex(-1);
+  }
 
   useEffect(() => {
     if (!audioRef.current || !current) return;
@@ -116,10 +143,16 @@ export default function MusicTab() {
             return (
               <div
                 key={track.id}
+                draggable
+                onDragStart={(e) => handleDragStart(e, i)}
+                onDragOver={(e) => handleDragOver(e, i)}
+                onDrop={(e) => handleDrop(e, i)}
+                onDragEnd={handleDragEnd}
                 className="flex items-center gap-3 p-2.5 rounded-lg cursor-pointer"
                 style={{
                   background: isActive ? "#f9731610" : "transparent",
                   border: isActive ? "1px solid #f9731430" : "1px solid transparent",
+                  opacity: dragIndex === i ? 0.5 : 1,
                 }}
                 onClick={() => { setMusicIndex(i); setMusicPlaying(true); }}
               >

@@ -8,6 +8,8 @@ import type {
   Monitor, TabId, OutputMode,
 } from "../types";
 
+const STORAGE_KEY = "openstage-settings-v1";
+
 let countdownInterval: ReturnType<typeof setInterval> | null = null;
 
 interface Store {
@@ -15,6 +17,13 @@ interface Store {
   activeTab: TabId;
   outputWindowReady: boolean;
   setActiveTab: (tab: TabId) => void;
+
+  // ── Loading / Error States ─────────────────────────────────────────────
+  isLoading: boolean;
+  error: string | null;
+  setLoading: (loading: boolean) => void;
+  setError: (error: string | null) => void;
+  clearError: () => void;
 
   // ── Output state ────────────────────────────────────────────────────────
   outputMode: OutputMode;
@@ -27,6 +36,7 @@ interface Store {
   activeSlideId: string | null;
   loadSlides: () => Promise<void>;
   goLiveSlide: (id: string) => void;
+  reorderSlides: (fromIndex: number, toIndex: number) => void;
   removeSlide: (id: string) => void;
 
   // ── Songs ──────────────────────────────────────────────────────────────
@@ -68,6 +78,7 @@ interface Store {
   loadMusic: () => Promise<void>;
   setMusicIndex: (i: number) => void;
   setMusicPlaying: (p: boolean) => void;
+  reorderMusic: (fromIndex: number, toIndex: number) => void;
   removeMusic: (id: string) => void;
 
   // ── Display ────────────────────────────────────────────────────────────
@@ -76,6 +87,10 @@ interface Store {
   fetchMonitors: () => Promise<void>;
   setSelectedMonitor: (i: number) => void;
   openOutput: () => Promise<void>;
+
+  // ── Persist settings ────────────────────────────────────────────────────
+  loadSettings: () => void;
+  saveSettings: () => void;
 }
 
 export const useStore = create<Store>((set, get) => ({
@@ -83,6 +98,13 @@ export const useStore = create<Store>((set, get) => ({
   activeTab: "slides",
   outputWindowReady: false,
   setActiveTab: (tab) => set({ activeTab: tab }),
+
+  // ── Loading / Error ─────────────────────────────────────────────────────
+  isLoading: false,
+  error: null,
+  setLoading: (loading) => set({ isLoading: loading }),
+  setError: (error) => set({ error }),
+  clearError: () => set({ error: null }),
 
   // ── Output ──────────────────────────────────────────────────────────────
   outputMode: "blank",
@@ -104,20 +126,29 @@ export const useStore = create<Store>((set, get) => ({
   activeSlideId: null,
 
   loadSlides: async () => {
-    const files = await openDialog({
-      multiple: true,
-      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp"] }],
-    });
-    if (!files) return;
-    const arr = Array.isArray(files) ? files : [files];
-    const items: MediaItem[] = arr.map((f) => ({
-      id: crypto.randomUUID(),
-      name: (f as string).split(/[\\/]/).pop() ?? f as string,
-      path: f as string,
-      src: convertFileSrc(f as string),
-      type: "image",
-    }));
-    set((s) => ({ slides: [...s.slides, ...items] }));
+    const { setLoading, setError, clearError } = get();
+    try {
+      setLoading(true);
+      clearError();
+      const files = await openDialog({
+        multiple: true,
+        filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp"] }],
+      });
+      if (!files) return;
+      const arr = Array.isArray(files) ? files : [files];
+      const items: MediaItem[] = arr.map((f) => ({
+        id: crypto.randomUUID(),
+        name: (f as string).split(/[\\/]/).pop() ?? f as string,
+        path: f as string,
+        src: convertFileSrc(f as string),
+        type: "image",
+      }));
+      set((s) => ({ slides: [...s.slides, ...items] }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Fehler beim Laden der Folien");
+    } finally {
+      setLoading(false);
+    }
   },
 
   goLiveSlide: (id) => {
@@ -125,6 +156,15 @@ export const useStore = create<Store>((set, get) => ({
     if (!slide) return;
     set({ activeSlideId: id, outputMode: "image", isBlackout: false });
     sendToOutput({ mode: "image", image: { src: slide.src } });
+  },
+
+  reorderSlides: (fromIndex: number, toIndex: number) => {
+    set((s) => {
+      const newSlides = [...s.slides];
+      const [removed] = newSlides.splice(fromIndex, 1);
+      newSlides.splice(toIndex, 0, removed);
+      return { slides: newSlides };
+    });
   },
 
   removeSlide: (id) =>
@@ -254,20 +294,29 @@ export const useStore = create<Store>((set, get) => ({
   activeVideoId: null,
 
   loadVideos: async () => {
-    const files = await openDialog({
-      multiple: true,
-      filters: [{ name: "Videos", extensions: ["mp4", "mov", "avi", "mkv", "webm"] }],
-    });
-    if (!files) return;
-    const arr = Array.isArray(files) ? files : [files];
-    const items: MediaItem[] = arr.map((f) => ({
-      id: crypto.randomUUID(),
-      name: (f as string).split(/[\\/]/).pop() ?? (f as string),
-      path: f as string,
-      src: convertFileSrc(f as string),
-      type: "video",
-    }));
-    set((s) => ({ videos: [...s.videos, ...items] }));
+    const { setLoading, setError, clearError } = get();
+    try {
+      setLoading(true);
+      clearError();
+      const files = await openDialog({
+        multiple: true,
+        filters: [{ name: "Videos", extensions: ["mp4", "mov", "avi", "mkv", "webm"] }],
+      });
+      if (!files) return;
+      const arr = Array.isArray(files) ? files : [files];
+      const items: MediaItem[] = arr.map((f) => ({
+        id: crypto.randomUUID(),
+        name: (f as string).split(/[\\/]/).pop() ?? (f as string),
+        path: f as string,
+        src: convertFileSrc(f as string),
+        type: "video",
+      }));
+      set((s) => ({ videos: [...s.videos, ...items] }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Fehler beim Laden der Videos");
+    } finally {
+      setLoading(false);
+    }
   },
 
   goLiveVideo: (id) => {
@@ -286,23 +335,51 @@ export const useStore = create<Store>((set, get) => ({
   musicPlaying: false,
 
   loadMusic: async () => {
-    const files = await openDialog({
-      multiple: true,
-      filters: [{ name: "Audio", extensions: ["mp3", "wav", "ogg", "flac", "aac", "m4a"] }],
-    });
-    if (!files) return;
-    const arr = Array.isArray(files) ? files : [files];
-    const items: MusicItem[] = arr.map((f) => ({
-      id: crypto.randomUUID(),
-      name: (f as string).split(/[\\/]/).pop() ?? (f as string),
-      path: f as string,
-      src: convertFileSrc(f as string),
-    }));
-    set((s) => ({ music: [...s.music, ...items] }));
+    const { setLoading, setError, clearError } = get();
+    try {
+      setLoading(true);
+      clearError();
+      const files = await openDialog({
+        multiple: true,
+        filters: [{ name: "Audio", extensions: ["mp3", "wav", "ogg", "flac", "aac", "m4a"] }],
+      });
+      if (!files) return;
+      const arr = Array.isArray(files) ? files : [files];
+      const items: MusicItem[] = arr.map((f) => ({
+        id: crypto.randomUUID(),
+        name: (f as string).split(/[\\/]/).pop() ?? (f as string),
+        path: f as string,
+        src: convertFileSrc(f as string),
+      }));
+      set((s) => ({ music: [...s.music, ...items] }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Fehler beim Laden der Musik");
+    } finally {
+      setLoading(false);
+    }
   },
 
   setMusicIndex: (i) => set({ musicIndex: i }),
   setMusicPlaying: (p) => set({ musicPlaying: p }),
+
+  reorderMusic: (fromIndex: number, toIndex: number) => {
+    set((s) => {
+      const newMusic = [...s.music];
+      const [removed] = newMusic.splice(fromIndex, 1);
+      newMusic.splice(toIndex, 0, removed);
+      // Adjust musicIndex if needed
+      let newIndex = s.musicIndex;
+      if (fromIndex === s.musicIndex) {
+        newIndex = toIndex;
+      } else if (fromIndex < s.musicIndex && toIndex >= s.musicIndex) {
+        newIndex--;
+      } else if (fromIndex > s.musicIndex && toIndex <= s.musicIndex) {
+        newIndex++;
+      }
+      return { music: newMusic, musicIndex: newIndex };
+    });
+  },
+
   removeMusic: (id) =>
     set((s) => ({
       music: s.music.filter((x) => x.id !== id),
@@ -318,8 +395,9 @@ export const useStore = create<Store>((set, get) => ({
     try {
       const monitors = await invoke<Monitor[]>("get_monitors");
       set({ monitors });
-    } catch {
-      console.warn("Could not fetch monitors");
+    } catch (err) {
+      console.warn("Could not fetch monitors:", err);
+      set({ monitors: [] });
     }
   },
 
@@ -329,4 +407,46 @@ export const useStore = create<Store>((set, get) => ({
     await openOutputWindow();
     set({ outputWindowReady: true });
   },
+
+  // ── Persist settings ────────────────────────────────────────────────────
+  loadSettings: () => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        set({
+          countdownDuration: parsed.countdownDuration ?? 300,
+          countdownRemaining: parsed.countdownDuration ?? 300,
+          countdownLabel: parsed.countdownLabel ?? "Gottesdienst beginnt in",
+          selectedMonitor: parsed.selectedMonitor ?? 0,
+        });
+      }
+    } catch {
+      console.warn("Could not load settings");
+    }
+  },
+
+  saveSettings: () => {
+    try {
+      const { countdownDuration, countdownLabel, selectedMonitor } = get();
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ countdownDuration, countdownLabel, selectedMonitor })
+      );
+    } catch {
+      console.warn("Could not save settings");
+    }
+  },
 }));
+
+// Auto-save settings on changes
+useStore.subscribe((state) => {
+  state.saveSettings();
+});
+
+// Load settings on init
+(() => {
+  if (typeof window !== "undefined") {
+    useStore.getState().loadSettings();
+  }
+})();
