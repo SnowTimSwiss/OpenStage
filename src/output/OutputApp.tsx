@@ -144,13 +144,73 @@ export default function OutputApp() {
   }
 
   // ── Countdown ─────────────────────────────────────────────────────────────
-  if (mode === "countdown" && state.countdown !== undefined) {
-    const { remaining, label } = state.countdown;
-    const urgent = remaining <= 10 && remaining > 0;
-    return (
-      <div
-        className="w-screen h-screen bg-black flex flex-col items-center justify-center gap-6 transition-opacity duration-300"
-        style={{ opacity: isTransitioning ? 0 : 1 }}
+	  if (mode === "countdown" && state.countdown !== undefined) {
+	    const { remaining, label, theme = "default" } = state.countdown;
+	    const urgent = remaining <= 10 && remaining > 0;
+
+	    if (theme === "minimal") {
+	      return (
+	        <div
+	          className="w-screen h-screen bg-black flex flex-col items-center justify-center gap-4 transition-opacity duration-300"
+	          style={{ opacity: isTransitioning ? 0 : 1 }}
+	        >
+	          {label && (
+	            <p
+	              className="text-white/40 uppercase tracking-widest text-xl"
+	              style={{ fontFamily: "'Sora', sans-serif" }}
+	            >
+	              {label}
+	            </p>
+	          )}
+	          <p
+	            className="font-mono leading-none"
+	            style={{
+	              fontSize: "clamp(7rem, 20vw, 20rem)",
+	              fontFamily: "'JetBrains Mono', monospace",
+	              fontWeight: 700,
+	              color: urgent ? "#ef4444" : "#ffffff",
+	            }}
+	          >
+	            {formatTime(remaining)}
+	          </p>
+	        </div>
+	      );
+	    }
+
+	    if (theme === "bold") {
+	      return (
+	        <div
+	          className="w-screen h-screen bg-black flex flex-col items-center justify-center transition-opacity duration-300"
+	          style={{ opacity: isTransitioning ? 0 : 1 }}
+	        >
+	          <div className="absolute top-0 left-0 right-0 h-2" style={{ background: urgent ? "#ef4444" : "#f97316" }} />
+	          {label && (
+	            <p
+	              className="text-white/60 uppercase tracking-[0.2em] text-3xl mb-6"
+	              style={{ fontFamily: "'Sora', sans-serif" }}
+	            >
+	              {label}
+	            </p>
+	          )}
+	          <p
+	            className="font-mono leading-none"
+	            style={{
+	              fontSize: "clamp(6rem, 18vw, 18rem)",
+	              fontFamily: "'JetBrains Mono', monospace",
+	              fontWeight: 800,
+	              color: urgent ? "#ef4444" : "#ffffff",
+	              textShadow: urgent ? "0 0 60px #ef444480" : "0 0 40px #f9731640",
+	            }}
+	          >
+	            {formatTime(remaining)}
+	          </p>
+	        </div>
+	      );
+	    }
+	    return (
+	      <div
+	        className="w-screen h-screen bg-black flex flex-col items-center justify-center gap-6 transition-opacity duration-300"
+	        style={{ opacity: isTransitioning ? 0 : 1 }}
       >
         {label && (
           <p

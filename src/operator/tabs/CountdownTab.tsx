@@ -13,18 +13,29 @@ const PRESETS = [
   { label: "30 min", seconds: 1800 },
 ];
 
+const THEMES = [
+  { id: "default", label: "Default" },
+  { id: "minimal", label: "Minimal" },
+  { id: "bold", label: "Bold" },
+] as const;
+
 export default function CountdownTab() {
-  const duration = useStore((s) => s.countdownDuration);
-  const remaining = useStore((s) => s.countdownRemaining);
-  const label = useStore((s) => s.countdownLabel);
-  const running = useStore((s) => s.countdownRunning);
-  const live = useStore((s) => s.countdownLive);
-  const setDuration = useStore((s) => s.setCountdownDuration);
-  const setLabel = useStore((s) => s.setCountdownLabel);
-  const start = useStore((s) => s.startCountdown);
-  const stop = useStore((s) => s.stopCountdown);
-  const reset = useStore((s) => s.resetCountdown);
-  const setLive = useStore((s) => s.setCountdownLive);
+	  const duration = useStore((s) => s.countdownDuration);
+	  const remaining = useStore((s) => s.countdownRemaining);
+	  const label = useStore((s) => s.countdownLabel);
+	  const running = useStore((s) => s.countdownRunning);
+	  const live = useStore((s) => s.countdownLive);
+	  const targetTime = useStore((s) => s.countdownTargetTime);
+	  const theme = useStore((s) => s.countdownTheme);
+	  const setDuration = useStore((s) => s.setCountdownDuration);
+	  const setLabel = useStore((s) => s.setCountdownLabel);
+	  const setTargetTime = useStore((s) => s.setCountdownTargetTime);
+	  const applyTargetTime = useStore((s) => s.applyCountdownTargetTime);
+	  const setTheme = useStore((s) => s.setCountdownTheme);
+	  const start = useStore((s) => s.startCountdown);
+	  const stop = useStore((s) => s.stopCountdown);
+	  const reset = useStore((s) => s.resetCountdown);
+	  const setLive = useStore((s) => s.setCountdownLive);
 
   const progress = duration > 0 ? (remaining / duration) : 0;
   const urgent = remaining <= 10 && remaining > 0 && running;
@@ -86,11 +97,11 @@ export default function CountdownTab() {
           />
         </div>
 
-        {/* Duration */}
-        <div>
-          <label className="text-xs font-medium block mb-2" style={{ color: "#666" }}>
-            Dauer
-          </label>
+	        {/* Duration */}
+	        <div>
+	          <label className="text-xs font-medium block mb-2" style={{ color: "#666" }}>
+	            Dauer
+	          </label>
           <div className="flex gap-2 mb-3">
             {PRESETS.map((p) => (
               <button
@@ -119,11 +130,61 @@ export default function CountdownTab() {
               onChange={(e) => setDuration(Number(e.target.value) * 60)}
             />
             <span className="text-sm" style={{ color: "#555" }}>Minuten</span>
-          </div>
-        </div>
+	          </div>
+	        </div>
 
-        {/* Controls */}
-        <div className="flex flex-col gap-2">
+	        {/* Target time */}
+	        <div>
+	          <label className="text-xs font-medium block mb-2" style={{ color: "#666" }}>
+	            Zielzeit (Countdown endet um)
+	          </label>
+	          <div className="flex items-center gap-2">
+	            <input
+	              type="time"
+	              className="w-32 text-sm px-3 py-2 rounded outline-none"
+	              style={{ background: "#141414", border: "1px solid #252525", color: "#ddd" }}
+	              value={targetTime ?? ""}
+	              onChange={(e) => setTargetTime(e.target.value || null)}
+	            />
+	            <button
+	              onClick={applyTargetTime}
+	              className="px-3 py-2 rounded text-xs font-medium"
+	              style={{ background: "#1f1f1f", color: "#f97316", border: "1px solid #333" }}
+	              title="Setzt Dauer so, dass der Countdown zur Zielzeit bei 00:00 ist"
+	            >
+	              Anwenden
+	            </button>
+	          </div>
+	          <p className="text-[11px] mt-2" style={{ color: "#555" }}>
+	            Wenn die Uhrzeit schon vorbei ist, wird automatisch auf morgen gerechnet.
+	          </p>
+	        </div>
+
+	        {/* Themes */}
+	        <div>
+	          <label className="text-xs font-medium block mb-2" style={{ color: "#666" }}>
+	            Theme (Beamer)
+	          </label>
+	          <div className="flex gap-2">
+	            {THEMES.map((t) => (
+	              <button
+	                key={t.id}
+	                onClick={() => setTheme(t.id)}
+	                className="flex-1 py-2 rounded text-xs font-medium transition-all"
+	                style={{
+	                  background: theme === t.id ? "#f9731620" : "#141414",
+	                  color: theme === t.id ? "#f97316" : "#666",
+	                  border: theme === t.id ? "1px solid #f9731640" : "1px solid #222",
+	                }}
+	              >
+	                {t.label}
+	              </button>
+	            ))}
+	          </div>
+	        </div>
+
+	        {/* Controls */}
+	        <div className="flex flex-col gap-2">
           <div className="flex gap-2">
             <button
               onClick={running ? stop : start}

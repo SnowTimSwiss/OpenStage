@@ -9,13 +9,17 @@ import MusicTab from "./tabs/MusicTab";
 import DisplayTab from "./tabs/DisplayTab";
 
 export default function OperatorApp() {
-  const activeTab = useStore((s) => s.activeTab);
-  const openOutput = useStore((s) => s.openOutput);
+	  const activeTab = useStore((s) => s.activeTab);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const toggleBlackout = useStore.getState().toggleBlackout;
-    const nextSlide = useStore.getState().nextSongSlide;
+	  // Fetch monitors once on startup (also restores output window placement).
+	  useEffect(() => {
+	    useStore.getState().fetchMonitors();
+	  }, []);
+
+	  // Keyboard shortcuts
+	  useEffect(() => {
+	    const toggleBlackout = useStore.getState().toggleBlackout;
+	    const nextSlide = useStore.getState().nextSongSlide;
     const prevSlide = useStore.getState().prevSongSlide;
 
     function onKey(e: KeyboardEvent) {

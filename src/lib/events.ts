@@ -67,3 +67,10 @@ export async function assignOutputToMonitor(
   await w.setSize({ type: "Physical", width, height } as any);
   await w.setFullscreen(true);
 }
+
+/** Close the output window */
+export async function closeOutputWindow() {
+  const w = await WebviewWindow.getByLabel("output");
+  if (!w) return;
+  await w.close();
+}

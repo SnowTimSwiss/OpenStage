@@ -27,7 +27,7 @@ Alle wesentlichen Änderungen an OpenStage werden in dieser Datei dokumentiert.
 
 ---
 
-## [0.1.0] - 2026-03-16
+## [0.2.0] - 2026-03-16
 
 ### Hinzugefügt
 - Multi-Display Konfiguration (Operator-Ansicht + Beamer-Ausgabe)

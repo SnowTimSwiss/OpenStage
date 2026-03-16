@@ -56,12 +56,14 @@ export type OutputMode =
   | "song"
   | "countdown";
 
+export type CountdownTheme = "default" | "minimal" | "bold";
+
 export interface OutputPayload {
   mode: OutputMode;
   image?: { src: string };
   video?: { src: string; playing?: boolean };
   song?: { text: string; title: string; index: number; total: number };
-  countdown?: { remaining: number; label: string; running: boolean };
+  countdown?: { remaining: number; label: string; running: boolean; theme?: CountdownTheme };
 }
 
 // ── Store ────────────────────────────────────────────────────────────────────

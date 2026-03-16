@@ -2,11 +2,11 @@ import { create } from "zustand";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { sendToOutput, openOutputWindow } from "../lib/events";
+import { sendToOutput, openOutputWindow, assignOutputToMonitor, closeOutputWindow as closeOutputFn } from "../lib/events";
 import type {
-  Song, SongSlide, MediaItem, MusicItem,
-  Monitor, TabId, OutputMode, PptxGroup,
-} from "../types";
+	  Song, SongSlide, MediaItem, MusicItem,
+	  Monitor, TabId, OutputMode, PptxGroup, CountdownTheme,
+	} from "../types";
 
 const STORAGE_KEY = "openstage-settings-v1";
 
@@ -32,12 +32,13 @@ interface Store {
   clearOutput: () => void;
 
   // ── Slides (images) ────────────────────────────────────────────────────
-  slides: MediaItem[];
-  activeSlideId: string | null;
-  loadSlides: () => Promise<void>;
-  goLiveSlide: (id: string) => void;
-  reorderSlides: (fromIndex: number, toIndex: number) => void;
-  removeSlide: (id: string) => void;
+	  slides: MediaItem[];
+	  activeSlideId: string | null;
+	  loadMedia: () => Promise<void>;
+	  loadSlides: () => Promise<void>;
+	  goLiveSlide: (id: string) => void;
+	  reorderSlides: (fromIndex: number, toIndex: number) => void;
+	  removeSlide: (id: string) => void;
 
   // ── PPTX Groups ────────────────────────────────────────────────────────
   pptxGroups: PptxGroup[];
@@ -60,17 +61,22 @@ interface Store {
   prevSongSlide: () => void;
 
   // ── Countdown ──────────────────────────────────────────────────────────
-  countdownDuration: number; // seconds
-  countdownRemaining: number;
-  countdownLabel: string;
-  countdownRunning: boolean;
-  countdownLive: boolean;
-  setCountdownDuration: (s: number) => void;
-  setCountdownLabel: (l: string) => void;
-  startCountdown: () => void;
-  stopCountdown: () => void;
-  resetCountdown: () => void;
-  setCountdownLive: (live: boolean) => void;
+	  countdownDuration: number; // seconds
+	  countdownRemaining: number;
+	  countdownLabel: string;
+	  countdownRunning: boolean;
+	  countdownLive: boolean;
+	  countdownTargetTime: string | null; // "HH:MM" (local time)
+	  countdownTheme: CountdownTheme;
+	  setCountdownDuration: (s: number) => void;
+	  setCountdownLabel: (l: string) => void;
+	  setCountdownTargetTime: (t: string | null) => void;
+	  applyCountdownTargetTime: () => void;
+	  setCountdownTheme: (theme: CountdownTheme) => void;
+	  startCountdown: () => void;
+	  stopCountdown: () => void;
+	  resetCountdown: () => void;
+	  setCountdownLive: (live: boolean) => void;
 
   // ── Video ──────────────────────────────────────────────────────────────
   videos: MediaItem[];
@@ -91,10 +97,11 @@ interface Store {
 
   // ── Display ────────────────────────────────────────────────────────────
   monitors: Monitor[];
-  selectedMonitor: number;
+  outputMonitorIndex: number | null; // null = kein Output-Monitor ausgewählt
+  outputWindowOpen: boolean;
   fetchMonitors: () => Promise<void>;
-  setSelectedMonitor: (i: number) => void;
-  openOutput: () => Promise<void>;
+  setOutputMonitor: (i: number | null) => Promise<void>;
+  closeOutputWindow: () => Promise<void>;
 
   // ── Persist settings ────────────────────────────────────────────────────
   loadSettings: () => void;
@@ -130,13 +137,76 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   // ── Slides ──────────────────────────────────────────────────────────────
-  slides: [],
-  activeSlideId: null,
+	  slides: [],
+	  activeSlideId: null,
 
-  loadSlides: async () => {
-    const { setLoading, setError, clearError } = get();
-    try {
-      setLoading(true);
+	  loadMedia: async () => {
+	    const { setLoading, setError, clearError } = get();
+	    const imageExt = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp"]);
+	    const videoExt = new Set(["mp4", "mov", "avi", "mkv", "webm"]);
+	    const allExt = [...imageExt, ...videoExt];
+
+	    const extOf = (p: string) => {
+	      const file = p.split(/[\\/]/).pop() ?? p;
+	      const idx = file.lastIndexOf(".");
+	      return idx >= 0 ? file.slice(idx + 1).toLowerCase() : "";
+	    };
+
+	    try {
+	      setLoading(true);
+	      clearError();
+	      const files = await openDialog({
+	        multiple: true,
+	        filters: [
+	          { name: "Medien", extensions: allExt },
+	          { name: "Bilder", extensions: [...imageExt] },
+	          { name: "Videos", extensions: [...videoExt] },
+	        ],
+	      });
+	      if (!files) return;
+	      const arr = Array.isArray(files) ? files : [files];
+
+	      const slidesToAdd: MediaItem[] = [];
+	      const videosToAdd: MediaItem[] = [];
+
+	      for (const f of arr) {
+	        const path = f as string;
+	        const name = path.split(/[\\/]/).pop() ?? path;
+	        const ext = extOf(path);
+	        if (imageExt.has(ext)) {
+	          slidesToAdd.push({
+	            id: crypto.randomUUID(),
+	            name,
+	            path,
+	            src: convertFileSrc(path),
+	            type: "image",
+	          });
+	        } else if (videoExt.has(ext)) {
+	          videosToAdd.push({
+	            id: crypto.randomUUID(),
+	            name,
+	            path,
+	            src: convertFileSrc(path),
+	            type: "video",
+	          });
+	        }
+	      }
+
+	      set((s) => ({
+	        slides: slidesToAdd.length ? [...s.slides, ...slidesToAdd] : s.slides,
+	        videos: videosToAdd.length ? [...s.videos, ...videosToAdd] : s.videos,
+	      }));
+	    } catch (err) {
+	      setError(err instanceof Error ? err.message : "Fehler beim Laden der Medien");
+	    } finally {
+	      setLoading(false);
+	    }
+	  },
+
+	  loadSlides: async () => {
+	    const { setLoading, setError, clearError } = get();
+	    try {
+	      setLoading(true);
       clearError();
       const files = await openDialog({
         multiple: true,
@@ -182,42 +252,42 @@ export const useStore = create<Store>((set, get) => ({
   pptxGroups: [],
   expandedGroupId: null,
 
-  loadPptx: async () => {
-    const { setLoading, setError, clearError } = get();
-    try {
-      setLoading(true);
-      clearError();
-      const files = await openDialog({
-        multiple: true,
-        filters: [{ name: "PowerPoint", extensions: ["pptx"] }],
-      });
-      if (!files) return;
-      const arr = Array.isArray(files) ? files : [files];
-      
-      for (const file of arr) {
-        const filePath = file as string;
-        const pptxFile = await invoke<any>("import_pptx", { path: filePath });
-        const groupId = crypto.randomUUID();
-        
-        const slides: MediaItem[] = pptxFile.slides.map((slide: any) => ({
-          id: crypto.randomUUID(),
-          name: slide.name,
-          path: filePath,
-          src: `data:image/png;base64,${slide.image_data}`,
-          type: "image",
-          groupId,
-        }));
-        
-        set((s) => ({
-          pptxGroups: [...s.pptxGroups, { id: groupId, name: pptxFile.name, slides }],
-        }));
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Fehler beim Laden der PowerPoint-Datei");
-    } finally {
-      setLoading(false);
-    }
-  },
+	  loadPptx: async () => {
+	    const { setLoading, setError, clearError } = get();
+	    try {
+	      setLoading(true);
+	      clearError();
+	      const files = await openDialog({
+	        multiple: true,
+	        filters: [{ name: "PowerPoint", extensions: ["pptx"] }],
+	      });
+	      if (!files) return;
+	      const arr = Array.isArray(files) ? files : [files];
+	      
+	      for (const file of arr) {
+	        const filePath = file as string;
+	        const pptxFile = await invoke<any>("import_pptx", { path: filePath });
+	        const groupId = crypto.randomUUID();
+	        
+	        const slides: MediaItem[] = pptxFile.slides.map((slide: any) => ({
+	          id: crypto.randomUUID(),
+	          name: slide.name,
+	          path: filePath,
+	          src: convertFileSrc(slide.image_path),
+	          type: "image",
+	          groupId,
+	        }));
+	        
+	        set((s) => ({
+	          pptxGroups: [...s.pptxGroups, { id: groupId, name: pptxFile.name, slides }],
+	        }));
+	      }
+	    } catch (err) {
+	      setError(err instanceof Error ? err.message : "Fehler beim Laden der PowerPoint-Datei");
+	    } finally {
+	      setLoading(false);
+	    }
+	  },
 
   toggleExpandGroup: (groupId) =>
     set((s) => ({ expandedGroupId: s.expandedGroupId === groupId ? null : groupId })),
@@ -289,71 +359,126 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   // ── Countdown ──────────────────────────────────────────────────────────
-  countdownDuration: 300,
-  countdownRemaining: 300,
-  countdownLabel: "Gottesdienst beginnt in",
-  countdownRunning: false,
-  countdownLive: false,
+	  countdownDuration: 300,
+	  countdownRemaining: 300,
+	  countdownLabel: "Gottesdienst beginnt in",
+	  countdownRunning: false,
+	  countdownLive: false,
+	  countdownTargetTime: null,
+	  countdownTheme: "default",
 
-  setCountdownDuration: (s) => set({ countdownDuration: s, countdownRemaining: s }),
-  setCountdownLabel: (l) => set({ countdownLabel: l }),
+	  setCountdownDuration: (s) => set({ countdownDuration: s, countdownRemaining: s }),
+	  setCountdownLabel: (l) => set({ countdownLabel: l }),
+	  setCountdownTargetTime: (t) => set({ countdownTargetTime: t }),
 
-  startCountdown: () => {
-    if (get().countdownRunning) return;
-    set({ countdownRunning: true });
-    countdownInterval = setInterval(() => {
-      const { countdownRemaining, countdownLabel, countdownLive, stopCountdown } = get();
-      const next = countdownRemaining - 1;
-      set({ countdownRemaining: Math.max(next, 0) });
-      if (countdownLive) {
-        sendToOutput({
-          mode: "countdown",
-          countdown: { remaining: Math.max(next, 0), label: countdownLabel, running: true },
-        });
-      }
-      if (next <= 0) stopCountdown();
-    }, 1000);
-  },
+	  applyCountdownTargetTime: () => {
+	    const t = get().countdownTargetTime;
+	    if (!t) return;
+	    const m = /^(\d{1,2}):(\d{2})$/.exec(t.trim());
+	    if (!m) return;
+	    const hh = Number(m[1]);
+	    const mm = Number(m[2]);
+	    if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return;
 
-  stopCountdown: () => {
-    if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
-    set({ countdownRunning: false });
-    const { countdownRemaining, countdownLabel } = get();
-    if (get().countdownLive) {
-      sendToOutput({
-        mode: "countdown",
-        countdown: { remaining: countdownRemaining, label: countdownLabel, running: false },
-      });
-    }
-  },
+	    const now = new Date();
+	    const target = new Date(now);
+	    target.setHours(hh, mm, 0, 0);
+	    if (target.getTime() <= now.getTime()) {
+	      target.setDate(target.getDate() + 1);
+	    }
+	    const diffSeconds = Math.max(0, Math.round((target.getTime() - now.getTime()) / 1000));
 
-  resetCountdown: () => {
-    if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
-    const d = get().countdownDuration;
-    set({ countdownRunning: false, countdownRemaining: d });
-    if (get().countdownLive) {
-      sendToOutput({
-        mode: "countdown",
-        countdown: { remaining: d, label: get().countdownLabel, running: false },
-      });
-    }
-  },
+	    if (countdownInterval) {
+	      clearInterval(countdownInterval);
+	      countdownInterval = null;
+	    }
+	    set({ countdownRunning: false, countdownDuration: diffSeconds, countdownRemaining: diffSeconds });
 
-  setCountdownLive: (live) => {
-    set({ countdownLive: live, outputMode: live ? "countdown" : get().outputMode, isBlackout: false });
-    if (live) {
-      sendToOutput({
-        mode: "countdown",
-        countdown: {
-          remaining: get().countdownRemaining,
-          label: get().countdownLabel,
-          running: get().countdownRunning,
-        },
-      });
-    } else {
-      sendToOutput({ mode: "blank" });
-    }
-  },
+	    if (get().countdownLive) {
+	      sendToOutput({
+	        mode: "countdown",
+	        countdown: {
+	          remaining: diffSeconds,
+	          label: get().countdownLabel,
+	          running: false,
+	          theme: get().countdownTheme,
+	        },
+	      });
+	    }
+	  },
+
+	  setCountdownTheme: (theme) => {
+	    set({ countdownTheme: theme });
+	    if (get().countdownLive) {
+	      sendToOutput({
+	        mode: "countdown",
+	        countdown: {
+	          remaining: get().countdownRemaining,
+	          label: get().countdownLabel,
+	          running: get().countdownRunning,
+	          theme,
+	        },
+	      });
+	    }
+	  },
+
+	  startCountdown: () => {
+	    if (get().countdownRunning) return;
+	    set({ countdownRunning: true });
+	    countdownInterval = setInterval(() => {
+	      const { countdownRemaining, countdownLabel, countdownLive, stopCountdown, countdownTheme } = get();
+	      const next = countdownRemaining - 1;
+	      set({ countdownRemaining: Math.max(next, 0) });
+	      if (countdownLive) {
+	        sendToOutput({
+	          mode: "countdown",
+	          countdown: { remaining: Math.max(next, 0), label: countdownLabel, running: true, theme: countdownTheme },
+	        });
+	      }
+	      if (next <= 0) stopCountdown();
+	    }, 1000);
+	  },
+
+	  stopCountdown: () => {
+	    if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
+	    set({ countdownRunning: false });
+	    const { countdownRemaining, countdownLabel, countdownTheme } = get();
+	    if (get().countdownLive) {
+	      sendToOutput({
+	        mode: "countdown",
+	        countdown: { remaining: countdownRemaining, label: countdownLabel, running: false, theme: countdownTheme },
+	      });
+	    }
+	  },
+
+	  resetCountdown: () => {
+	    if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
+	    const d = get().countdownDuration;
+	    set({ countdownRunning: false, countdownRemaining: d });
+	    if (get().countdownLive) {
+	      sendToOutput({
+	        mode: "countdown",
+	        countdown: { remaining: d, label: get().countdownLabel, running: false, theme: get().countdownTheme },
+	      });
+	    }
+	  },
+
+	  setCountdownLive: (live) => {
+	    set({ countdownLive: live, outputMode: live ? "countdown" : get().outputMode, isBlackout: false });
+	    if (live) {
+	      sendToOutput({
+	        mode: "countdown",
+	        countdown: {
+	          remaining: get().countdownRemaining,
+	          label: get().countdownLabel,
+	          running: get().countdownRunning,
+	          theme: get().countdownTheme,
+	        },
+	      });
+	    } else {
+	      sendToOutput({ mode: "blank" });
+	    }
+	  },
 
   // ── Video ──────────────────────────────────────────────────────────────
   videos: [],
@@ -455,59 +580,91 @@ export const useStore = create<Store>((set, get) => ({
 
   // ── Display ──────────────────────────────────────────────────────────────
   monitors: [],
-  selectedMonitor: 0,
+  outputMonitorIndex: null,
+  outputWindowOpen: false,
 
-  fetchMonitors: async () => {
-    try {
-      const monitors = await invoke<Monitor[]>("get_monitors");
-      set({ monitors });
-    } catch (err) {
-      console.warn("Could not fetch monitors:", err);
-      set({ monitors: [] });
+	  fetchMonitors: async () => {
+	    try {
+	      const monitors = await invoke<Monitor[]>("get_monitors");
+	      set({ monitors });
+
+	      // If a monitor is already configured, (re)open and place the output window.
+	      const configured = get().outputMonitorIndex;
+	      if (configured !== null) {
+	        if (configured >= 0 && configured < monitors.length) {
+	          await get().setOutputMonitor(configured);
+	        } else {
+	          set({ outputMonitorIndex: null, outputWindowOpen: false });
+	        }
+	      }
+	    } catch (err) {
+	      console.warn("Could not fetch monitors:", err);
+	      set({ monitors: [] });
+	    }
+  },
+
+  setOutputMonitor: async (i) => {
+    set({ outputMonitorIndex: i });
+    if (i === null) {
+      // Close output window
+      await closeOutputFn();
+      set({ outputWindowOpen: false });
+    } else {
+      // Open/reposition output window on selected monitor
+      try {
+        const m = get().monitors[i];
+        if (m) {
+          await openOutputWindow();
+          await assignOutputToMonitor(m.x, m.y, m.width, m.height);
+          set({ outputWindowOpen: true, error: null });
+        }
+      } catch (err) {
+        console.error("Failed to set output monitor:", err);
+        set({ error: "Ausgabefenster konnte nicht geöffnet werden" });
+      }
     }
   },
 
-  setSelectedMonitor: (i) => set({ selectedMonitor: i }),
-
-  openOutput: async () => {
+  closeOutputWindow: async () => {
     try {
-      await openOutputWindow();
-      set({ outputWindowReady: true });
+      await closeOutputFn();
     } catch (err) {
-      console.error("Failed to open output window:", err);
-      set({ error: "Ausgabefenster konnte nicht geöffnet werden" });
+      console.error("Failed to close output window:", err);
     }
+    set({ outputWindowOpen: false });
   },
 
   // ── Persist settings ────────────────────────────────────────────────────
-  loadSettings: () => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        set({
-          countdownDuration: parsed.countdownDuration ?? 300,
-          countdownRemaining: parsed.countdownDuration ?? 300,
-          countdownLabel: parsed.countdownLabel ?? "Gottesdienst beginnt in",
-          selectedMonitor: parsed.selectedMonitor ?? 0,
-        });
-      }
-    } catch {
-      console.warn("Could not load settings");
+	  loadSettings: () => {
+	    try {
+	      const saved = localStorage.getItem(STORAGE_KEY);
+	      if (saved) {
+	        const parsed = JSON.parse(saved);
+	        set({
+	          countdownDuration: parsed.countdownDuration ?? 300,
+	          countdownRemaining: parsed.countdownDuration ?? 300,
+	          countdownLabel: parsed.countdownLabel ?? "Gottesdienst beginnt in",
+	          countdownTargetTime: parsed.countdownTargetTime ?? null,
+	          countdownTheme: parsed.countdownTheme ?? "default",
+	          outputMonitorIndex: parsed.outputMonitorIndex ?? null,
+	        });
+	      }
+	    } catch {
+	      console.warn("Could not load settings");
     }
   },
 
-  saveSettings: () => {
-    try {
-      const { countdownDuration, countdownLabel, selectedMonitor } = get();
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({ countdownDuration, countdownLabel, selectedMonitor })
-      );
-    } catch {
-      console.warn("Could not save settings");
-    }
-  },
+	  saveSettings: () => {
+	    try {
+	      const { countdownDuration, countdownLabel, countdownTargetTime, countdownTheme, outputMonitorIndex } = get();
+	      localStorage.setItem(
+	        STORAGE_KEY,
+	        JSON.stringify({ countdownDuration, countdownLabel, countdownTargetTime, countdownTheme, outputMonitorIndex })
+	      );
+	    } catch {
+	      console.warn("Could not save settings");
+	    }
+	  },
 }));
 
 // Auto-save settings on changes
