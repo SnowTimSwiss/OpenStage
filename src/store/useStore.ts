@@ -365,7 +365,7 @@ export const useStore = create<Store>((set, get) => ({
 	  countdownRunning: false,
 	  countdownLive: false,
 	  countdownTargetTime: null,
-	  countdownTheme: "default",
+	  countdownTheme: "minimal",
 
 	  setCountdownDuration: (s) => set({ countdownDuration: s, countdownRemaining: s }),
 	  setCountdownLabel: (l) => set({ countdownLabel: l }),
@@ -645,7 +645,7 @@ export const useStore = create<Store>((set, get) => ({
 	          countdownRemaining: parsed.countdownDuration ?? 300,
 	          countdownLabel: parsed.countdownLabel ?? "Gottesdienst beginnt in",
 	          countdownTargetTime: parsed.countdownTargetTime ?? null,
-	          countdownTheme: parsed.countdownTheme ?? "default",
+	          countdownTheme: parsed.countdownTheme ?? "minimal",
 	          outputMonitorIndex: parsed.outputMonitorIndex ?? null,
 	        });
 	      }

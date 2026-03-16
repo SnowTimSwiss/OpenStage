@@ -62,9 +62,13 @@ function PreviewPanel() {
   const activeSlideId = useStore((s) => s.activeSlideId);
   const slides = useStore((s) => s.slides);
   const countdownRemaining = useStore((s) => s.countdownRemaining);
+  const countdownLabel = useStore((s) => s.countdownLabel);
+  const activeVideoId = useStore((s) => s.activeVideoId);
+  const videos = useStore((s) => s.videos);
 
   const activeSong = songs.find((s) => s.id === activeSongId);
   const activeSlide = slides.find((s) => s.id === activeSlideId);
+  const activeVideo = videos.find((v) => v.id === activeVideoId);
 
   function formatTime(s: number) {
     const m = Math.floor(s / 60);
@@ -86,7 +90,7 @@ function PreviewPanel() {
       {/* Preview screen */}
       <div className="p-3">
         <div
-          className="w-full rounded-lg overflow-hidden flex items-center justify-center"
+          className="w-full rounded-lg overflow-hidden flex items-center justify-center relative"
           style={{
             aspectRatio: "16/9",
             background: isBlackout ? "#000" : "#0a0a0a",
@@ -98,15 +102,25 @@ function PreviewPanel() {
           ) : outputMode === "image" && activeSlide ? (
             <img src={activeSlide.src} alt="" className="w-full h-full object-contain" />
           ) : outputMode === "song" && activeSong ? (
-            <div className="p-2 text-center">
-              <p className="text-white leading-tight" style={{ fontSize: "8px" }}>
+            <div className="p-2 text-center w-full">
+              <p className="text-white leading-tight" style={{ fontSize: "10px" }}>
                 {activeSong.slides[activeSongSlide]?.text}
               </p>
             </div>
           ) : outputMode === "countdown" ? (
-            <span className="font-mono text-white text-lg font-bold" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-              {formatTime(countdownRemaining)}
-            </span>
+            <div className="flex flex-col items-center gap-1">
+              <span className="font-mono text-white text-lg font-bold" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                {formatTime(countdownRemaining)}
+              </span>
+              {countdownLabel && (
+                <span className="text-[8px] text-gray-500 uppercase tracking-wider">{countdownLabel}</span>
+              )}
+            </div>
+          ) : outputMode === "video" && activeVideo ? (
+            <div className="flex flex-col items-center gap-2">
+              <span className="text-2xl">🎬</span>
+              <span className="text-[9px] text-gray-400 max-w-[90%] truncate">{activeVideo.name}</span>
+            </div>
           ) : outputMode === "video" ? (
             <span className="text-2xl">🎬</span>
           ) : (
@@ -129,6 +143,11 @@ function PreviewPanel() {
             <span style={{ color: "#888" }}>
               {activeSongSlide + 1}/{activeSong.slides.length}
             </span>
+          </div>
+        )}
+        {outputMode === "video" && activeVideo && (
+          <div className="text-[11px] truncate" style={{ color: "#444" }}>
+            Video: <span style={{ color: "#888" }}>{activeVideo.name}</span>
           </div>
         )}
       </div>

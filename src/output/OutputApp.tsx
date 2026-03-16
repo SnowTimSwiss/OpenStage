@@ -13,12 +13,13 @@ export default function OutputApp() {
   const [state, setState] = useState<OutputPayload>({ mode: "blank" });
   const [previousMode, setPreviousMode] = useState<OutputPayload["mode"]>("blank");
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [videoError, setVideoError] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const videoErrorRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (state.mode !== previousMode) {
       setIsTransitioning(true);
+      setVideoError(false);
       const timer = setTimeout(() => {
         setIsTransitioning(false);
         setPreviousMode(state.mode);
@@ -29,12 +30,13 @@ export default function OutputApp() {
 
   useEffect(() => {
     const unlisten = listen<OutputPayload>(OUTPUT_EVENT, (e) => {
+      console.log("Output event received:", e.payload);
       setState(e.payload);
       if (e.payload.mode === "video" && e.payload.video?.playing && videoRef.current) {
         videoRef.current.currentTime = 0;
         videoRef.current.play().catch((err) => {
           console.error("Video play error:", err);
-          videoErrorRef.current = true;
+          setVideoError(true);
         });
       }
     });
@@ -42,7 +44,10 @@ export default function OutputApp() {
     const unlistenCtrl = listen<{ action: string }>(VIDEO_CTRL_EVENT, (e) => {
       if (!videoRef.current) return;
       if (e.payload.action === "play") {
-        videoRef.current.play().catch((err) => console.error("Play error:", err));
+        videoRef.current.play().catch((err) => {
+          console.error("Play error:", err);
+          setVideoError(true);
+        });
       }
       if (e.payload.action === "pause") {
         videoRef.current.pause();
@@ -54,11 +59,6 @@ export default function OutputApp() {
       unlistenCtrl.then((f) => f());
     };
   }, []);
-
-  // Reset video error state on mode change
-  useEffect(() => {
-    videoErrorRef.current = false;
-  }, [state.mode]);
 
   const { mode } = state;
 
@@ -84,6 +84,7 @@ export default function OutputApp() {
           alt=""
           className="w-full h-full object-contain"
           draggable={false}
+          onError={() => console.error("Failed to load image")}
         />
       </div>
     );
@@ -93,7 +94,7 @@ export default function OutputApp() {
   if (mode === "video" && state.video) {
     return (
       <div
-        className="w-screen h-screen bg-black flex items-center justify-center transition-opacity duration-300"
+        className="w-screen h-screen bg-black flex items-center justify-center transition-opacity duration-300 relative"
         style={{ opacity: isTransitioning ? 0 : 1 }}
       >
         <video
@@ -105,12 +106,13 @@ export default function OutputApp() {
           onEnded={() => setState({ mode: "blank" })}
           onError={(e) => {
             console.error("Video error:", e);
-            videoErrorRef.current = true;
+            setVideoError(true);
           }}
+          onPlay={() => setVideoError(false)}
         />
-        {videoErrorRef.current && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/80">
-            <div className="text-center">
+        {videoError && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-10">
+            <div className="text-center px-4">
               <p className="text-white text-lg mb-2">⚠️ Video kann nicht abgespielt werden</p>
               <p className="text-gray-400 text-sm">Das Video-Format wird möglicherweise nicht unterstützt</p>
             </div>
@@ -148,6 +150,7 @@ export default function OutputApp() {
 	    const { remaining, label, theme = "default" } = state.countdown;
 	    const urgent = remaining <= 10 && remaining > 0;
 
+	    // Minimal = current (classic) look
 	    if (theme === "minimal") {
 	      return (
 	        <div
@@ -156,7 +159,7 @@ export default function OutputApp() {
 	        >
 	          {label && (
 	            <p
-	              className="text-white/40 uppercase tracking-widest text-xl"
+	              className="text-white/50 uppercase tracking-widest text-2xl"
 	              style={{ fontFamily: "'Sora', sans-serif" }}
 	            >
 	              {label}
@@ -165,10 +168,44 @@ export default function OutputApp() {
 	          <p
 	            className="font-mono leading-none"
 	            style={{
-	              fontSize: "clamp(7rem, 20vw, 20rem)",
+	              fontSize: "clamp(6rem, 18vw, 18rem)",
+	              fontFamily: "'JetBrains Mono', monospace",
+	              fontWeight: 600,
+	              color: urgent ? "#ef4444" : "#ffffff",
+	              textShadow: urgent ? "0 0 40px #ef444480" : "none",
+	              transition: "color 0.3s, text-shadow 0.3s",
+	            }}
+	          >
+	            {formatTime(remaining)}
+	          </p>
+	        </div>
+	      );
+	    }
+
+	    if (theme === "default") {
+	      return (
+	        <div
+	          className="w-screen h-screen bg-black flex flex-col items-center justify-center gap-6 transition-opacity duration-300 relative overflow-hidden"
+	          style={{ opacity: isTransitioning ? 0 : 1 }}
+	        >
+	          <div className="countdown-bg-aurora" />
+	          {label && (
+	            <p
+	              className="text-white/55 uppercase tracking-widest text-2xl"
+	              style={{ fontFamily: "'Sora', sans-serif" }}
+	            >
+	              {label}
+	            </p>
+	          )}
+	          <p
+	            className="font-mono leading-none"
+	            style={{
+	              fontSize: "clamp(6rem, 18vw, 18rem)",
 	              fontFamily: "'JetBrains Mono', monospace",
 	              fontWeight: 700,
 	              color: urgent ? "#ef4444" : "#ffffff",
+	              textShadow: urgent ? "0 0 60px #ef444480" : "0 0 40px #f9731633",
+	              transition: "color 0.3s, text-shadow 0.3s",
 	            }}
 	          >
 	            {formatTime(remaining)}
@@ -180,9 +217,10 @@ export default function OutputApp() {
 	    if (theme === "bold") {
 	      return (
 	        <div
-	          className="w-screen h-screen bg-black flex flex-col items-center justify-center transition-opacity duration-300"
+	          className="w-screen h-screen bg-black flex flex-col items-center justify-center transition-opacity duration-300 relative overflow-hidden"
 	          style={{ opacity: isTransitioning ? 0 : 1 }}
 	        >
+	          <div className="countdown-bg-pulse" />
 	          <div className="absolute top-0 left-0 right-0 h-2" style={{ background: urgent ? "#ef4444" : "#f97316" }} />
 	          {label && (
 	            <p
@@ -207,35 +245,16 @@ export default function OutputApp() {
 	        </div>
 	      );
 	    }
+
+	    // Fallback to minimal
 	    return (
-	      <div
-	        className="w-screen h-screen bg-black flex flex-col items-center justify-center gap-6 transition-opacity duration-300"
-	        style={{ opacity: isTransitioning ? 0 : 1 }}
-      >
-        {label && (
-          <p
-            className="text-white/50 uppercase tracking-widest text-2xl"
-            style={{ fontFamily: "'Sora', sans-serif" }}
-          >
-            {label}
-          </p>
-        )}
-        <p
-          className="font-mono leading-none"
-          style={{
-            fontSize: "clamp(6rem, 18vw, 18rem)",
-            fontFamily: "'JetBrains Mono', monospace",
-            fontWeight: 600,
-            color: urgent ? "#ef4444" : "#ffffff",
-            textShadow: urgent ? "0 0 40px #ef444480" : "none",
-            transition: "color 0.3s, text-shadow 0.3s",
-          }}
-        >
-          {formatTime(remaining)}
-        </p>
-      </div>
-    );
-  }
+	      <div className="w-screen h-screen bg-black flex items-center justify-center">
+	        <p className="font-mono text-white" style={{ fontSize: "clamp(6rem, 18vw, 18rem)" }}>
+	          {formatTime(remaining)}
+	        </p>
+	      </div>
+	    );
+	  }
 
   return <div className="w-screen h-screen bg-black" />;
 }

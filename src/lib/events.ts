@@ -7,12 +7,20 @@ export const VIDEO_CTRL_EVENT = "openstage:video-ctrl";
 
 /** Broadcast a state update to the output window */
 export async function sendToOutput(payload: OutputPayload) {
-  await emit(OUTPUT_EVENT, payload);
+  try {
+    await emit(OUTPUT_EVENT, payload);
+  } catch (err) {
+    console.warn("Failed to send to output:", err);
+  }
 }
 
 /** Send video control: play | pause */
 export async function sendVideoControl(action: "play" | "pause") {
-  await emit(VIDEO_CTRL_EVENT, { action });
+  try {
+    await emit(VIDEO_CTRL_EVENT, { action });
+  } catch (err) {
+    console.warn("Failed to send video control:", err);
+  }
 }
 
 /** Open the output window (or focus if already open) */
@@ -37,7 +45,7 @@ export async function openOutputWindow() {
   // Wait for window to be created with timeout
   try {
     await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error("Window creation timeout")), 5000);
+      const timeout = setTimeout(() => reject(new Error("Window creation timeout")), 10000);
       w.once("tauri://created", () => {
         clearTimeout(timeout);
         resolve();
@@ -49,6 +57,7 @@ export async function openOutputWindow() {
     });
   } catch (err) {
     console.error("Failed to create output window:", err);
+    throw err;
   }
 
   return w;
@@ -62,15 +71,27 @@ export async function assignOutputToMonitor(
   height: number
 ) {
   const w = await WebviewWindow.getByLabel("output");
-  if (!w) return;
-  await w.setPosition({ type: "Physical", x, y } as any);
-  await w.setSize({ type: "Physical", width, height } as any);
-  await w.setFullscreen(true);
+  if (!w) {
+    console.warn("Output window not found, trying to create it...");
+    await openOutputWindow();
+  }
+  const windowInstance = await WebviewWindow.getByLabel("output");
+  if (!windowInstance) {
+    throw new Error("Could not create output window");
+  }
+  await windowInstance.setPosition({ type: "Physical", x, y } as any);
+  await windowInstance.setSize({ type: "Physical", width, height } as any);
+  await windowInstance.setFullscreen(true);
+  await windowInstance.setFocus();
 }
 
 /** Close the output window */
 export async function closeOutputWindow() {
   const w = await WebviewWindow.getByLabel("output");
   if (!w) return;
-  await w.close();
+  try {
+    await w.close();
+  } catch (err) {
+    console.error("Failed to close output window:", err);
+  }
 }

@@ -14,9 +14,9 @@ const PRESETS = [
 ];
 
 const THEMES = [
-  { id: "default", label: "Default" },
   { id: "minimal", label: "Minimal" },
-  { id: "bold", label: "Bold" },
+  { id: "default", label: "Aurora" },
+  { id: "bold", label: "Pulse" },
 ] as const;
 
 export default function CountdownTab() {

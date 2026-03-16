@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "../../store/useStore";
 
 export default function DisplayTab() {
@@ -7,16 +7,34 @@ export default function DisplayTab() {
   const outputWindowOpen = useStore((s) => s.outputWindowOpen);
   const fetchMonitors = useStore((s) => s.fetchMonitors);
   const setOutputMonitor = useStore((s) => s.setOutputMonitor);
+  const error = useStore((s) => s.error);
+  const clearError = useStore((s) => s.clearError);
+  const [isProcessing, setIsProcessing] = useState<number | null>(null);
 
   useEffect(() => { fetchMonitors(); }, []);
 
+  // Auto-clear error after 5 seconds
+  useEffect(() => {
+    if (error) {
+      const timer = setTimeout(() => clearError(), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [error, clearError]);
+
   async function handleToggleOutput(i: number) {
-    if (outputMonitorIndex === i) {
-      // Deselect - close output window
-      await setOutputMonitor(null);
-    } else {
-      // Select this monitor as output
-      await setOutputMonitor(i);
+    setIsProcessing(i);
+    try {
+      if (outputMonitorIndex === i) {
+        // Deselect - close output window
+        await setOutputMonitor(null);
+      } else {
+        // Select this monitor as output
+        await setOutputMonitor(i);
+      }
+    } catch (err) {
+      console.error("Failed to toggle output:", err);
+    } finally {
+      setIsProcessing(null);
     }
   }
 
@@ -25,6 +43,16 @@ export default function DisplayTab() {
       <div className="px-4 py-3 border-b" style={{ borderColor: "#252525" }}>
         <h2 className="text-sm font-semibold text-white">Display Konfiguration</h2>
       </div>
+
+      {/* Error Message */}
+      {error && (
+        <div className="px-4 py-2 bg-red-500/10 border-b border-red-500/20">
+          <div className="flex items-center gap-2 text-red-400 text-sm">
+            <span>⚠️</span>
+            <span>{error}</span>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-6">
         {/* Info Box */}
@@ -60,7 +88,7 @@ export default function DisplayTab() {
               <p>Keine Monitore erkannt</p>
               <button
                 onClick={fetchMonitors}
-                className="text-xs px-3 py-1.5 rounded mt-2"
+                className="text-xs px-3 py-1.5 rounded mt-2 hover:bg-[#252525] transition-colors"
                 style={{ background: "#1f1f1f", color: "#888" }}
               >
                 Erneut suchen
@@ -71,6 +99,7 @@ export default function DisplayTab() {
               {monitors.map((m, i) => {
                 const isOutput = outputMonitorIndex === i;
                 const isPrimary = i === 0;
+                const isLoading = isProcessing === i;
 
                 return (
                   <div
@@ -92,15 +121,19 @@ export default function DisplayTab() {
                           border: isOutput ? "2px solid #f97316" : "2px solid #2a2a2a",
                         }}
                       >
-                        <span
-                          className="text-xs font-mono"
-                          style={{ color: isOutput ? "#f97316" : "#444" }}
-                        >
-                          {m.width}×{m.height}
-                        </span>
+                        {isLoading ? (
+                          <div className="w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <span
+                            className="text-xs font-mono"
+                            style={{ color: isOutput ? "#f97316" : "#444" }}
+                          >
+                            {m.width}×{m.height}
+                          </span>
+                        )}
 
                         {/* Badges */}
-                        {isPrimary && (
+                        {isPrimary && !isLoading && (
                           <div
                             className="absolute -top-1.5 -left-1.5 text-[8px] px-1.5 py-0.5 rounded"
                             style={{ background: "#1a1a1a", color: "#666", border: "1px solid #333" }}
@@ -108,7 +141,7 @@ export default function DisplayTab() {
                             Haupt
                           </div>
                         )}
-                        {isOutput && (
+                        {isOutput && !isLoading && (
                           <div
                             className="absolute -top-1.5 -right-1.5 text-[8px] px-1.5 py-0.5 rounded live-dot"
                             style={{ background: "#f97316", color: "white", border: "1px solid #f97316" }}
@@ -130,7 +163,7 @@ export default function DisplayTab() {
                           {m.width} × {m.height} px · Position ({m.x}, {m.y})
                         </div>
                         {isOutput && outputWindowOpen && (
-                          <div className="text-xs mt-1 live-dot" style={{ color: "#22c55e" }}>
+                          <div className="text-xs mt-1" style={{ color: "#22c55e" }}>
                             ● Ausgabefenster aktiv
                           </div>
                         )}
@@ -139,7 +172,8 @@ export default function DisplayTab() {
                       {/* Action Button */}
                       <button
                         onClick={() => handleToggleOutput(i)}
-                        className={`px-4 py-2 rounded-lg font-semibold text-sm transition-all ${
+                        disabled={isLoading}
+                        className={`px-4 py-2 rounded-lg font-semibold text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                           isOutput
                             ? "bg-red-500/20 text-red-500 hover:bg-red-500/30"
                             : "bg-orange-500 text-white hover:bg-orange-600"
@@ -148,7 +182,7 @@ export default function DisplayTab() {
                           boxShadow: isOutput ? "none" : "0 0 20px #f9731640",
                         }}
                       >
-                        {isOutput ? "✕ Deaktivieren" : "▶ Als Ausgabe"}
+                        {isLoading ? "Laden..." : isOutput ? "✕ Deaktivieren" : "▶ Als Ausgabe"}
                       </button>
                     </div>
                   </div>
@@ -165,7 +199,7 @@ export default function DisplayTab() {
             style={{ background: "#0a1f0a", border: "1px solid #1a4a1a" }}
           >
             <div className="flex items-center gap-2 mb-2">
-              <span className="w-2 h-2 rounded-full bg-green-500 live-dot" />
+              <span className="w-2 h-2 rounded-full bg-green-500" />
               <span className="text-xs font-semibold" style={{ color: "#4a9a4a" }}>
                 Aktuelle Konfiguration
               </span>
