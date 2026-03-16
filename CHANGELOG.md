@@ -2,9 +2,14 @@
 
 Alle wesentlichen Änderungen an OpenStage werden in dieser Datei dokumentiert.
 
-## [Unreleased]
+## [1.0.0] - 2026-03-16
 
 ### Hinzugefügt
+- **PowerPoint-Import mit LibreOffice-Integration**
+  - Automatische Erkennung ob LibreOffice installiert ist
+  - Installations-Prompt mit Download-Link wenn nicht vorhanden
+  - Konvertiert PPTX-Folien zu Bildern (PNG)
+  - Unterstützt Windows, macOS, Linux
 - Drag & Drop für Folien-Reihenfolge
 - Drag & Drop für Musik-Queue
 - Fade-Transitionen (300ms) bei Output-Wechseln
@@ -24,6 +29,7 @@ Alle wesentlichen Änderungen an OpenStage werden in dieser Datei dokumentiert.
 ### Behoben
 - Memory-Leak bei Intervalls (Countdown)
 - Unwrap-Panic in der Monitor-API
+- Terminal-Fenster beim LibreOffice-Aufruf (Windows)
 
 ---
 
