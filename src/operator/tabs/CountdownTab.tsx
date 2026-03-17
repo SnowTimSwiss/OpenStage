@@ -233,7 +233,7 @@ export default function CountdownTab() {
 
           <div className="mt-3">
             <label className="text-[11px] block mb-1" style={{ color: "#666" }}>
-              Maximal-Lautstaerke
+              Max. Lautstaerke (%)
             </label>
             <div className="flex items-center gap-2">
               <input
@@ -252,9 +252,9 @@ export default function CountdownTab() {
           </div>
 
           <p className="text-[11px] mt-2" style={{ color: "#555" }}>
-            Musik startet {musicStartMin} min vor 00 mit {startVolumePercent}% Lautstaerke.
+            Musik startet {musicStartMin} min vor 00 mit {startVolumePercent}% der max. Lautst&a;rke.
             Ab {fadeInStartMin} min wird auf {Math.round(bgVolume * 100)}% eingeblendet.
-            Bei {fullMin} min ist 100% erreicht.
+            Bei {fullMin} min ist Maximum erreicht.
           </p>
         </div>
 
