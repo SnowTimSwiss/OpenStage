@@ -161,6 +161,34 @@ function normalizeVolume(value: unknown, fallback: number): number {
 }
 
 /**
+ * Lädt die Metadaten einer Audio-Datei und gibt die Dauer in Sekunden zurück.
+ */
+function getAudioDuration(src: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const audio = new Audio();
+    audio.preload = "metadata";
+    
+    const cleanup = () => {
+      audio.onloadedmetadata = null;
+      audio.onerror = null;
+    };
+    
+    audio.onloadedmetadata = () => {
+      cleanup();
+      const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+      resolve(duration);
+    };
+    
+    audio.onerror = (err) => {
+      cleanup();
+      reject(new Error(`Failed to load audio metadata: ${err}`));
+    };
+    
+    audio.src = src;
+  });
+}
+
+/**
  * Berechnet die aktuelle Lautstärke basierend auf der verbleibenden Zeit und den Fade-Einstellungen.
  * 
  * Logik:
@@ -1083,15 +1111,33 @@ export const useStore = create<Store>((set, get) => ({
       });
       if (!files) return;
       const arr = Array.isArray(files) ? files : [files];
-      const items: MusicItem[] = arr.map((f) => ({
-        id: crypto.randomUUID(),
-        name: (f as string).split(/[\\/]/).pop() ?? f as string,
-        path: f as string,
-        src: convertFileSrc(f as string),
-        source: "local" as MusicSource,
-      }));
-      set((s) => ({ music: [...s.music, ...items] }));
       
+      // Load files and get duration
+      const items: MusicItem[] = await Promise.all(arr.map(async (f) => {
+        const path = f as string;
+        const name = path.split(/[\\/]/).pop() ?? f as string;
+        const src = convertFileSrc(path);
+        
+        // Get duration by loading audio metadata
+        let duration: number | undefined;
+        try {
+          duration = await getAudioDuration(src);
+        } catch (err) {
+          console.warn(`Could not get duration for ${name}:`, err);
+        }
+        
+        return {
+          id: crypto.randomUUID(),
+          name,
+          path,
+          src,
+          source: "local" as MusicSource,
+          duration,
+        };
+      }));
+      
+      set((s) => ({ music: [...s.music, ...items] }));
+
       // Add to playlist if specified
       if (playlistId) {
         const playlist = playlists.find((p) => p.id === playlistId);
@@ -1129,21 +1175,33 @@ export const useStore = create<Store>((set, get) => ({
         return audioExts.has(ext);
       });
 
-      const items: MusicItem[] = audioFiles.map((entry) => {
+      // Load files and get duration
+      const items: MusicItem[] = await Promise.all(audioFiles.map(async (entry) => {
         const fullPath = `${folder}/${entry.name}`;
+        const src = convertFileSrc(fullPath);
+        
+        // Get duration by loading audio metadata
+        let duration: number | undefined;
+        try {
+          duration = await getAudioDuration(src);
+        } catch (err) {
+          console.warn(`Could not get duration for ${entry.name}:`, err);
+        }
+        
         return {
           id: crypto.randomUUID(),
           name: entry.name,
           path: fullPath,
-          src: convertFileSrc(fullPath),
+          src,
           source: "local" as MusicSource,
+          duration,
         };
-      });
+      }));
 
       // Sort alphabetically by name
       items.sort((a, b) => a.name.localeCompare(b.name));
       set((s) => ({ music: [...s.music, ...items] }));
-      
+
       // Add to playlist if specified
       if (playlistId) {
         const playlist = playlists.find((p) => p.id === playlistId);
