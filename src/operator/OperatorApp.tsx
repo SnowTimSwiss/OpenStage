@@ -7,6 +7,7 @@ import SongsTab from "./tabs/SongsTab";
 import CountdownTab from "./tabs/CountdownTab";
 import MusicTab from "./tabs/MusicTab";
 import DisplayTab from "./tabs/DisplayTab";
+import ShowTab from "./tabs/ShowTab";
 
 export default function OperatorApp() {
   const activeTab = useStore((s) => s.activeTab);
@@ -44,6 +45,7 @@ export default function OperatorApp() {
           {activeTab === "countdown" && <CountdownTab />}
           {activeTab === "music" && <MusicTab />}
           {activeTab === "display" && <DisplayTab />}
+          {activeTab === "show" && <ShowTab />}
         </main>
 
         {/* Preview panel with music controls */}

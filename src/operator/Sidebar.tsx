@@ -7,6 +7,7 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "countdown", label: "Countdown", icon: "⏱️" },
   { id: "music",     label: "Musik",     icon: "🎧" },
   { id: "display",   label: "Display",   icon: "🖥️" },
+  { id: "show",      label: "Show",      icon: "🎬" },
 ];
 
 export default function Sidebar() {

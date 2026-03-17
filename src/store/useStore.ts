@@ -7,7 +7,7 @@ import { secondsUntilTargetTime } from "../lib/formatTime";
 import { getSpotifyPlaylistId, resolveSpotifyClientId } from "../lib/spotify";
 import type {
   Song, MediaItem, MusicItem, Playlist, SpotifyAuthState, MusicSource,
-  Monitor, TabId, OutputMode, PptxGroup, CountdownTheme,
+  Monitor, TabId, OutputMode, PptxGroup, CountdownTheme, ShowItem,
 } from "../types";
 
 const STORAGE_KEY = "openstage-settings-v1";
@@ -490,6 +490,20 @@ interface Store {
   fetchMonitors: () => Promise<void>;
   setOutputMonitor: (i: number | null) => Promise<void>;
   closeOutputWindow: () => Promise<void>;
+
+  // ── Show Mode ──────────────────────────────────────────────────────────
+  showQueue: ShowItem[];
+  showCurrentIndex: number;
+  addToShowQueue: (item: ShowItem) => void;
+  removeFromShowQueue: (id: string) => void;
+  setShowCurrentIndex: (index: number) => void;
+  updateShowItemSlideIndex: (itemId: string, slideIndex: number) => void;
+  showNext: () => void;
+  showPrevious: () => void;
+  showNextSlide: () => void; // next slide within current item (for songs/pptx)
+  showPreviousSlide: () => void; // previous slide within current item
+  reorderShowQueue: (fromIndex: number, toIndex: number) => void;
+  clearShowQueue: () => void;
 
   // ── Persist settings ────────────────────────────────────────────────────
   loadSettings: () => void;
@@ -1738,6 +1752,123 @@ export const useStore = create<Store>((set, get) => ({
       console.error("Failed to close output window:", err);
     }
     set({ outputWindowOpen: false });
+  },
+
+  // ── Show Mode ──────────────────────────────────────────────────────────
+  showQueue: [],
+  showCurrentIndex: -1,
+
+  addToShowQueue: (item) => {
+    set((s) => ({ showQueue: [...s.showQueue, item] }));
+  },
+
+  removeFromShowQueue: (id) => {
+    set((s) => ({ showQueue: s.showQueue.filter((item) => item.id !== id) }));
+  },
+
+  setShowCurrentIndex: (index) => {
+    set({ showCurrentIndex: index });
+  },
+
+  updateShowItemSlideIndex: (itemId, slideIndex) => {
+    set((s) => ({
+      showQueue: s.showQueue.map((item) =>
+        item.id === itemId ? { ...item, slideIndex } : item
+      ),
+    }));
+  },
+
+  showNext: () => {
+    const { showQueue, showCurrentIndex } = get();
+    if (showQueue.length === 0) return;
+    const nextIndex = Math.min(showQueue.length - 1, showCurrentIndex + 1);
+    set({ showCurrentIndex: nextIndex });
+  },
+
+  showPrevious: () => {
+    const { showQueue, showCurrentIndex } = get();
+    if (showQueue.length === 0) return;
+    const prevIndex = Math.max(0, showCurrentIndex - 1);
+    set({ showCurrentIndex: prevIndex });
+  },
+
+  showNextSlide: () => {
+    const state = get();
+    const { showQueue, showCurrentIndex, songs, pptxGroups } = state;
+    if (showQueue.length === 0 || showCurrentIndex < 0) return;
+
+    const currentItem = showQueue[showCurrentIndex];
+
+    // For songs: increment slide index
+    if (currentItem.type === "song" && currentItem.refId) {
+      const song = songs.find((s) => s.id === currentItem.refId);
+      if (song) {
+        const currentSlideIndex = currentItem.slideIndex ?? 0;
+        const nextSlideIndex = Math.min(song.slides.length - 1, currentSlideIndex + 1);
+        state.updateShowItemSlideIndex(currentItem.id, nextSlideIndex);
+        return;
+      }
+    }
+
+    // For pptx: increment slide index
+    if (currentItem.type === "pptx" && currentItem.refId) {
+      const group = pptxGroups.find((g) => g.id === currentItem.refId);
+      if (group) {
+        const currentSlideIndex = currentItem.slideIndex ?? 0;
+        const nextSlideIndex = Math.min(group.slides.length - 1, currentSlideIndex + 1);
+        state.updateShowItemSlideIndex(currentItem.id, nextSlideIndex);
+        return;
+      }
+    }
+
+    // Otherwise: go to next item
+    state.showNext();
+  },
+
+  showPreviousSlide: () => {
+    const state = get();
+    const { showQueue, showCurrentIndex, songs, pptxGroups } = state;
+    if (showQueue.length === 0 || showCurrentIndex < 0) return;
+
+    const currentItem = showQueue[showCurrentIndex];
+
+    // For songs: decrement slide index
+    if (currentItem.type === "song" && currentItem.refId) {
+      const song = songs.find((s) => s.id === currentItem.refId);
+      if (song) {
+        const currentSlideIndex = currentItem.slideIndex ?? 0;
+        const prevSlideIndex = Math.max(0, currentSlideIndex - 1);
+        state.updateShowItemSlideIndex(currentItem.id, prevSlideIndex);
+        return;
+      }
+    }
+
+    // For pptx: decrement slide index
+    if (currentItem.type === "pptx" && currentItem.refId) {
+      const group = pptxGroups.find((g) => g.id === currentItem.refId);
+      if (group) {
+        const currentSlideIndex = currentItem.slideIndex ?? 0;
+        const prevSlideIndex = Math.max(0, currentSlideIndex - 1);
+        state.updateShowItemSlideIndex(currentItem.id, prevSlideIndex);
+        return;
+      }
+    }
+
+    // Otherwise: go to previous item
+    state.showPrevious();
+  },
+
+  clearShowQueue: () => {
+    set({ showQueue: [], showCurrentIndex: -1 });
+  },
+
+  reorderShowQueue: (fromIndex, toIndex) => {
+    set((s) => {
+      const newQueue = [...s.showQueue];
+      const [removed] = newQueue.splice(fromIndex, 1);
+      newQueue.splice(toIndex, 0, removed);
+      return { showQueue: newQueue };
+    });
   },
 
   // ── Persist settings ────────────────────────────────────────────────────

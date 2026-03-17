@@ -2,6 +2,23 @@
 
 Alle wesentlichen Änderungen an OpenStage werden in dieser Datei dokumentiert.
 
+## [1.1.0] - 2026-03-17
+
+### Hinzugefügt
+- **Show Mode (Show Tab)** – Neuer Live-Control-View für Events
+  - Show Queue mit allen Items (Images, Videos, Songs, Countdown, PPTX)
+  - Vorschau-Fenster für aktuelles Item
+  - Drag & Drop zum Sortieren der Queue
+  - Keyboard-Controls: ←→ für Slides, ↑↓ für Items, Space für Next
+  - Slide-Navigation für Songs und PowerPoint-Präsentationen
+  - "Add to Show" Modal zur einfachen Auswahl
+  - Unterstützung für PowerPoint-Präsentationen mit Folien-Navigation
+  - Live-Indicator für aktuelles Item
+
+### Geändert
+- Preview im Show Tab vereinfacht (nur noch 1 Fenster)
+- Output-System erweitert für Show-Item-Wiedergabe
+
 ## [1.0.0] - 2026-03-16
 
 ### Hinzugefügt

@@ -112,6 +112,19 @@ export type TabId =
   | "songs"
   | "countdown"
   | "music"
-  | "display";
+  | "display"
+  | "show";
 
 export type TransitionType = "none" | "fade" | "slide" | "zoom";
+
+// ── Show Mode ────────────────────────────────────────────────────────────────
+
+export type ShowItemType = "image" | "video" | "song" | "countdown" | "pptx";
+
+export interface ShowItem {
+  id: string;
+  type: ShowItemType;
+  refId?: string; // reference to existing media/song/pptx group
+  label: string;
+  slideIndex?: number; // for songs/pptx: current slide number
+}
