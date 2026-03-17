@@ -31,6 +31,7 @@ pub struct PptxSlide {
     pub slide_number: u32,
     pub name: String,
     pub image_path: String, // Extracted slide image on disk
+    pub notes: Option<String>, // Presenter notes from the slide
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -118,6 +119,7 @@ fn import_pptx_with_libreoffice(
     path: String,
 ) -> Result<PptxFile, String> {
     use std::process::Command;
+    use zip::read::ZipArchive;
 
     // Check if LibreOffice is installed
     let libreoffice_path = find_libreoffice()
@@ -147,7 +149,7 @@ fn import_pptx_with_libreoffice(
         "--outdir", out_dir.to_str().ok_or("Invalid output directory")?,
         &path,
     ]);
-    
+
     // Hide console window on Windows
     #[cfg(target_os = "windows")]
     {
@@ -155,7 +157,7 @@ fn import_pptx_with_libreoffice(
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    
+
     let output = cmd.output()
         .map_err(|e| format!("Failed to run LibreOffice: {}", e))?;
 
@@ -178,6 +180,12 @@ fn import_pptx_with_libreoffice(
     // Sort by filename
     slide_images.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
 
+    // Extract presenter notes from the PPTX file (ZIP archive)
+    let file = std::fs::File::open(&path)
+        .map_err(|e| format!("Failed to open file: {}", e))?;
+    let mut archive = ZipArchive::new(file)
+        .map_err(|e| format!("Failed to read PPTX: {}", e))?;
+
     // Get presentation name
     let file_name = path
         .split('\\')
@@ -186,14 +194,30 @@ fn import_pptx_with_libreoffice(
         .unwrap_or("Presentation")
         .to_string();
 
-    // Create slide objects
+    // Create slide objects with notes
     let slides: Vec<PptxSlide> = slide_images
         .iter()
         .enumerate()
-        .map(|(i, image_path)| PptxSlide {
-            slide_number: (i + 1) as u32,
-            name: format!("Folie {}", i + 1),
-            image_path: image_path.to_string_lossy().to_string(),
+        .map(|(i, image_path)| {
+            let slide_num = (i + 1) as u32;
+            
+            // Extract presenter notes from notesSlide XML
+            let notes_path = format!("ppt/notesSlides/notesSlide{}.xml", slide_num);
+            let notes = archive
+                .by_name(&notes_path)
+                .ok()
+                .and_then(|mut f| {
+                    let mut content = String::new();
+                    f.read_to_string(&mut content).ok()?;
+                    extract_notes_from_xml(&content)
+                });
+
+            PptxSlide {
+                slide_number: slide_num,
+                name: format!("Folie {}", slide_num),
+                image_path: image_path.to_string_lossy().to_string(),
+                notes,
+            }
         })
         .collect();
 
@@ -349,6 +373,50 @@ fn start_spotify_auth_server(app: tauri::AppHandle, port: u16) -> Result<String,
     Ok(format!("http://127.0.0.1:{}/callback", port))
 }
 
+/// Extract presenter notes from a slide's notesSlide XML
+fn extract_notes_from_xml(xml_content: &str) -> Option<String> {
+    // Look for <p:txBody><a:p> elements containing the notes text
+    // PowerPoint stores notes in ppt/notesSlides/notesSlideX.xml
+    
+    // Simple extraction: find text inside <a:t> tags within the notes body
+    let mut notes = String::new();
+    let mut in_text = false;
+    let mut chars = xml_content.chars().peekable();
+    let mut tag_buffer = String::new();
+    
+    while let Some(c) = chars.next() {
+        if c == '<' {
+            tag_buffer.clear();
+            while let Some(&next_c) = chars.peek() {
+                if next_c == '>' {
+                    chars.next();
+                    break;
+                }
+                tag_buffer.push(chars.next()?);
+            }
+            
+            let tag_lower = tag_buffer.to_lowercase();
+            if tag_lower.starts_with("a:t") || tag_lower.starts_with("a:t ") {
+                in_text = true;
+            } else if tag_lower.starts_with("/a:t") {
+                in_text = false;
+                if !notes.is_empty() && !notes.ends_with(' ') {
+                    notes.push(' ');
+                }
+            }
+        } else if in_text {
+            notes.push(c);
+        }
+    }
+    
+    let notes = notes.trim().to_string();
+    if notes.is_empty() {
+        None
+    } else {
+        Some(notes)
+    }
+}
+
 #[tauri::command]
 fn import_pptx(path: String) -> Result<PptxFile, String> {
     let file = std::fs::File::open(&path)
@@ -457,10 +525,22 @@ fn import_pptx(path: String) -> Result<PptxFile, String> {
         std::fs::write(&out_path, &buffer)
             .map_err(|e| format!("Failed to write slide image: {}", e))?;
 
+        // Extract presenter notes from notesSlide XML
+        let notes_path = format!("ppt/notesSlides/notesSlide{}.xml", slide_num);
+        let notes = archive
+            .by_name(&notes_path)
+            .ok()
+            .and_then(|mut f| {
+                let mut content = String::new();
+                f.read_to_string(&mut content).ok()?;
+                extract_notes_from_xml(&content)
+            });
+
         slides.push(PptxSlide {
             slide_number: slide_num,
             name: format!("Folie {}", slide_num),
             image_path: out_path.to_string_lossy().to_string(),
+            notes,
         });
     }
 
@@ -497,10 +577,22 @@ fn import_pptx(path: String) -> Result<PptxFile, String> {
             std::fs::write(&out_path, &buffer)
                 .map_err(|e| format!("Failed to write slide image: {}", e))?;
 
+            // Extract presenter notes from notesSlide XML (fallback)
+            let notes_path = format!("ppt/notesSlides/notesSlide{}.xml", slide_num);
+            let notes = archive
+                .by_name(&notes_path)
+                .ok()
+                .and_then(|mut f| {
+                    let mut content = String::new();
+                    f.read_to_string(&mut content).ok()?;
+                    extract_notes_from_xml(&content)
+                });
+
             slides.push(PptxSlide {
                 slide_number: slide_num,
                 name: format!("Folie {}", slide_num),
                 image_path: out_path.to_string_lossy().to_string(),
+                notes,
             });
         }
     }

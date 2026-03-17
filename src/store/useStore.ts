@@ -690,6 +690,7 @@ export const useStore = create<Store>((set, get) => ({
           src: convertFileSrc(slide.image_path),
           type: "image",
           groupId,
+          notes: slide.notes,
         }));
 
         set((s) => ({

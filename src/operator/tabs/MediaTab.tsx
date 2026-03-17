@@ -29,6 +29,7 @@ export default function MediaTab() {
 	  const [filter, setFilter] = useState<FilterType>("all");
 	  const [_viewMode, _setViewMode] = useState<"grid" | "list">("grid");
 	  const [pptxPresentation, setPptxPresentation] = useState<{ groupId: string; index: number } | null>(null);
+	  const [isTransitioning, setIsTransitioning] = useState(false);
 
   // Slides (images)
 	  const slides = useStore((s) => s.slides);
@@ -109,6 +110,11 @@ export default function MediaTab() {
 	    if (!group) return;
 	    const nextIndex = Math.max(0, Math.min(group.slides.length - 1, pptxPresentation.index + delta));
 	    if (nextIndex === pptxPresentation.index) return;
+	    
+	    // Trigger transition animation
+	    setIsTransitioning(true);
+	    setTimeout(() => setIsTransitioning(false), 300);
+	    
 	    setPptxPresentation({ groupId: pptxPresentation.groupId, index: nextIndex });
 	    goLiveSlideFromGroup(pptxPresentation.groupId, nextIndex);
 	  }
@@ -554,14 +560,26 @@ export default function MediaTab() {
 	            </div>
 
 	            <div className="flex-1 grid grid-cols-3 gap-4 p-4">
+	              {/* Current Slide */}
 	              <div
-	                className="col-span-2 rounded-lg overflow-hidden flex items-center justify-center"
+	                className="col-span-2 rounded-lg overflow-hidden flex items-center justify-center relative"
 	                style={{ background: "#000", border: "1px solid #1e1e1e" }}
 	              >
-	                <img src={presentationCurrent.src} alt="" className="w-full h-full object-contain" draggable={false} />
+	                <img
+	                  src={presentationCurrent.src}
+	                  alt=""
+	                  className="w-full h-full object-contain transition-all duration-300 ease-out draggable-false"
+	                  style={{
+	                    opacity: isTransitioning ? 0.5 : 1,
+	                    transform: isTransitioning ? "scale(0.98)" : "scale(1)",
+	                    filter: isTransitioning ? "blur(2px)" : "none",
+	                  }}
+	                  draggable={false}
+	                />
 	              </div>
 
 	              <div className="col-span-1 flex flex-col gap-3">
+	                {/* Next Slide Preview */}
 	                <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: "#555" }}>
 	                  Nächste Folie
 	                </div>
@@ -570,12 +588,45 @@ export default function MediaTab() {
 	                  style={{ background: "#0a0a0a", border: "1px solid #1e1e1e" }}
 	                >
 	                  {presentationNext ? (
-	                    <img src={presentationNext.src} alt="" className="w-full h-full object-contain" draggable={false} />
+	                    <img
+	                      src={presentationNext.src}
+	                      alt=""
+	                      className="w-full h-full object-contain transition-all duration-300 draggable-false"
+	                      style={{
+	                        opacity: isTransitioning ? 0.7 : 1,
+	                        transform: isTransitioning ? "scale(1.05)" : "scale(1)",
+	                      }}
+	                      draggable={false}
+	                    />
 	                  ) : (
 	                    <span className="text-xs" style={{ color: "#444" }}>Ende</span>
 	                  )}
 	                </div>
 
+	                {/* Presenter Notes */}
+	                <div className="flex-1 flex flex-col">
+	                  <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "#555" }}>
+	                    Notizen
+	                  </div>
+	                  <div
+	                    className="flex-1 rounded-lg p-3 overflow-y-auto text-sm transition-all duration-300"
+	                    style={{ 
+	                      background: "#0a0a0a", 
+	                      border: "1px solid #1e1e1e",
+	                      color: presentationCurrent.notes ? "#ccc" : "#444",
+	                      opacity: isTransitioning ? 0.7 : 1,
+	                      transform: isTransitioning ? "translateX(5px)" : "translateX(0)",
+	                    }}
+	                  >
+	                    {presentationCurrent.notes ? (
+	                      <p className="whitespace-pre-wrap">{presentationCurrent.notes}</p>
+	                    ) : (
+	                      <p className="italic">Keine Notizen für diese Folie</p>
+	                    )}
+	                  </div>
+	                </div>
+
+	                {/* Navigation Buttons */}
 	                <div className="mt-auto flex gap-2">
 	                  <button
 	                    onClick={() => stepPresentation(-1)}
