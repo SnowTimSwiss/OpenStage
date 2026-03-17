@@ -147,15 +147,16 @@ export default function OutputApp() {
 
   // ── Countdown ─────────────────────────────────────────────────────────────
   if (mode === "countdown" && state.countdown !== undefined) {
-    const { remaining, label, theme = "default" } = state.countdown;
+    const { remaining, label, theme = "default", isFadingOut = false } = state.countdown;
     const urgent = remaining <= 10 && remaining > 0;
+    const opacity = isFadingOut ? 0 : 1;
 
     // Minimal = clean look
     if (theme === "minimal") {
       return (
         <div
           className="w-screen h-screen bg-black flex flex-col items-center justify-center gap-4 transition-opacity duration-300"
-          style={{ opacity: isTransitioning ? 0 : 1 }}
+          style={{ opacity: isTransitioning ? 0 : opacity }}
         >
           {label && (
             <p
@@ -187,7 +188,7 @@ export default function OutputApp() {
       return (
         <div
           className="w-screen h-screen bg-black flex flex-col items-center justify-center gap-6 transition-opacity duration-300 relative overflow-hidden"
-          style={{ opacity: isTransitioning ? 0 : 1 }}
+          style={{ opacity: isTransitioning ? 0 : opacity }}
         >
           <div className="countdown-bg-aurora" />
           {label && (
@@ -205,8 +206,8 @@ export default function OutputApp() {
               fontFamily: "'JetBrains Mono', monospace",
               fontWeight: 700,
               color: urgent ? "#ef4444" : "#ffffff",
-              textShadow: urgent 
-                ? "0 0 60px #ef444480, 0 0 100px #ef444440" 
+              textShadow: urgent
+                ? "0 0 60px #ef444480, 0 0 100px #ef444440"
                 : "0 0 40px #f9731650, 0 0 80px #f9731630",
               transition: "color 0.3s, text-shadow 0.3s",
             }}
@@ -222,15 +223,15 @@ export default function OutputApp() {
       return (
         <div
           className="w-screen h-screen bg-black flex flex-col items-center justify-center transition-opacity duration-300 relative overflow-hidden"
-          style={{ opacity: isTransitioning ? 0 : 1 }}
+          style={{ opacity: isTransitioning ? 0 : opacity }}
         >
           <div className="countdown-bg-pulse" />
-          <div 
-            className="absolute top-0 left-0 right-0 h-1.5" 
-            style={{ 
+          <div
+            className="absolute top-0 left-0 right-0 h-1.5"
+            style={{
               background: urgent ? "#ef4444" : "#f97316",
               boxShadow: `0 0 30px ${urgent ? "#ef4444" : "#f97316"}`,
-            }} 
+            }}
           />
           {label && (
             <p
@@ -247,8 +248,8 @@ export default function OutputApp() {
               fontFamily: "'JetBrains Mono', monospace",
               fontWeight: 800,
               color: urgent ? "#ef4444" : "#ffffff",
-              textShadow: urgent 
-                ? "0 0 60px #ef4444, 0 0 120px #ef444460" 
+              textShadow: urgent
+                ? "0 0 60px #ef4444, 0 0 120px #ef444460"
                 : "0 0 40px #f9731660, 0 0 80px #f9731640",
               transition: "color 0.3s, text-shadow 0.3s",
             }}
@@ -261,7 +262,7 @@ export default function OutputApp() {
 
     // Fallback to minimal
     return (
-      <div className="w-screen h-screen bg-black flex items-center justify-center">
+      <div className="w-screen h-screen bg-black flex items-center justify-center" style={{ opacity }}>
         <p className="font-mono text-white" style={{ fontSize: "clamp(6rem, 18vw, 18rem)" }}>
           {formatTime(remaining)}
         </p>

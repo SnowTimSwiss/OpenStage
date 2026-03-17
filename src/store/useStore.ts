@@ -77,6 +77,8 @@ let countdownBgPlaylistId: string | null = null;
 let countdownBgQueue: MusicItem[] = [];
 let countdownBgIndex = 0;
 let countdownBgBound = false;
+let countdownEndTime: number | null = null;
+let countdownFadeOutTimeout: ReturnType<typeof setTimeout> | null = null;
 
 // Spotify auth state
 let spotifyAuth: SpotifyAuthState = {
@@ -158,53 +160,125 @@ function normalizeVolume(value: unknown, fallback: number): number {
   return Math.max(0, Math.min(1, n));
 }
 
+/**
+ * Berechnet die aktuelle Lautstärke basierend auf der verbleibenden Zeit und den Fade-Einstellungen.
+ * 
+ * Logik:
+ * - musicStartMinutes: X Minuten vor 00 startet die Musik mit startVolumePercent
+ * - fadeInStartMinutes: Ab hier fängt die Musik an lauter zu werden
+ * - fullVolumeMinutes: Ab hier ist die Musik auf 100%
+ * 
+ * @param remainingSeconds Verbleibende Sekunden bis 00
+ */
+function calculateCountdownMusicVolume(remainingSeconds: number): number {
+  const a = ensureBackgroundMusicAudio();
+  if (!a) return 0;
+
+  const {
+    countdownBackgroundMusicVolume,
+    countdownBackgroundMusicStartMinutes,
+    countdownBackgroundMusicFadeInStartMinutes,
+    countdownBackgroundMusicFullVolumeMinutes,
+    countdownBackgroundMusicStartVolumePercent,
+  } = useStore.getState();
+
+  // Convert minutes to seconds
+  const startSec = Math.max(0, countdownBackgroundMusicStartMinutes) * 60;
+  const fadeInStartSec = Math.max(0, countdownBackgroundMusicFadeInStartMinutes) * 60;
+  const fullSec = Math.max(0, countdownBackgroundMusicFullVolumeMinutes) * 60;
+  
+  // Target volume (max volume, typically 1.0 = 100%)
+  const targetVolume = normalizeVolume(countdownBackgroundMusicVolume, 1.0);
+  
+  // Start volume as percentage (0-100% of targetVolume)
+  const startVolumePercent = Math.max(0, Math.min(100, countdownBackgroundMusicStartVolumePercent)) / 100;
+  const startVolume = startVolumePercent * targetVolume;
+
+  // Before music starts: silent
+  if (remainingSeconds > startSec) {
+    return 0;
+  }
+
+  // Music has started but before fade-in: use start volume
+  if (remainingSeconds > fadeInStartSec) {
+    return startVolume;
+  }
+
+  // In fade-in period: ramp from startVolume to targetVolume
+  if (remainingSeconds > fullSec) {
+    // Calculate progress through fade-in (0 at fadeInStart, 1 at fullSec)
+    const fadeRange = fadeInStartSec - fullSec;
+    if (fadeRange <= 0) {
+      return targetVolume;
+    }
+    const t = (fadeInStartSec - remainingSeconds) / fadeRange; // 0..1
+    return startVolume + (targetVolume - startVolume) * t;
+  }
+
+  // At full volume
+  return targetVolume;
+}
+
+/**
+ * Berechnet die optimale Startposition in der Playlist, sodass das letzte Lied genau bei 00 endet.
+ * 
+ * @param remainingSeconds Verbleibende Sekunden bis 00
+ * @param queue Playlist mit Liedern
+ * @param startIndex Aktueller Index in der Playlist
+ * @returns Objekt mit startIndex und skipTracks (Anzahl der zu überspringenden Sekunden im ersten Track)
+ */
+function calculateOptimalPlaylistStart(
+  remainingSeconds: number,
+  queue: MusicItem[],
+  startIndex: number
+): { startIndex: number; skipSeconds: number } {
+  if (queue.length === 0) {
+    return { startIndex: 0, skipSeconds: 0 };
+  }
+
+  // Calculate total playlist duration
+  const totalDuration = queue.reduce((sum, track) => sum + (track.duration || 0), 0);
+  
+  if (totalDuration <= 0) {
+    return { startIndex: 0, skipSeconds: 0 };
+  }
+
+  // Find the best starting point
+  // We want: remainingSeconds = duration from startIndex to end (with loops)
+  // With looping, we need to find where in the loop cycle we should start
+  
+  const loopsNeeded = Math.ceil(remainingSeconds / totalDuration);
+  const effectiveDuration = loopsNeeded * totalDuration;
+  const secondsToFill = effectiveDuration - remainingSeconds;
+  
+  // Find which track to start at
+  let accumulatedTime = 0;
+  let optimalIndex = startIndex;
+  let skipSeconds = 0;
+  
+  for (let i = 0; i < queue.length; i++) {
+    const trackIndex = (startIndex + i) % queue.length;
+    const track = queue[trackIndex];
+    const trackDuration = track.duration || 0;
+    
+    if (accumulatedTime + trackDuration >= secondsToFill) {
+      optimalIndex = trackIndex;
+      skipSeconds = secondsToFill - accumulatedTime;
+      break;
+    }
+    
+    accumulatedTime += trackDuration;
+  }
+  
+  return { startIndex: optimalIndex, skipSeconds: Math.max(0, skipSeconds) };
+}
+
 function updateCountdownBgVolume(remainingSeconds: number) {
   const a = ensureBackgroundMusicAudio();
   if (!a) return;
-  const {
-    countdownBackgroundMusicVolume,
-    countdownBackgroundMusicFadeStartMinutes,
-    countdownBackgroundMusicFullVolumeMinutes,
-    countdownBackgroundMusicFadeInStartPercent,
-    countdownBackgroundMusicFadeInStartMinutes,
-  } = useStore.getState();
 
-  const fadeStartSec = Math.max(0, countdownBackgroundMusicFadeStartMinutes) * 60;
-  const fullSec = Math.max(0, countdownBackgroundMusicFullVolumeMinutes) * 60;
-  const targetVolume = normalizeVolume(countdownBackgroundMusicVolume, 0.6);
-  const clampedFullSec = Math.min(fullSec, fadeStartSec);
-  const rampSec = Math.max(0, fadeStartSec - clampedFullSec);
-
-  const fadeInStartPercent = Math.max(0, Math.min(100, countdownBackgroundMusicFadeInStartPercent)) / 100;
-  const fadeInStartSec = Math.max(0, countdownBackgroundMusicFadeInStartMinutes) * 60;
-
-  let desired = 0;
-  if (fadeStartSec <= 0) {
-    desired = targetVolume;
-  } else if (remainingSeconds > fadeStartSec) {
-    // Before fade-in starts: check if we're in the fadeIn period
-    if (fadeInStartSec > 0 && remainingSeconds <= fadeInStartSec) {
-      // We're in the fadeIn period: ramp from fadeInStartPercent to targetVolume
-      const fadeInRampSec = fadeInStartSec - Math.max(fadeStartSec, clampedFullSec);
-      if (fadeInRampSec > 0) {
-        const fadeInT = (fadeInStartSec - remainingSeconds) / fadeInRampSec; // 0..1
-        const currentPercent = fadeInStartPercent + (1 - fadeInStartPercent) * fadeInT;
-        desired = Math.max(0, Math.min(1, currentPercent)) * targetVolume;
-      } else {
-        desired = fadeInStartPercent * targetVolume;
-      }
-    } else {
-      desired = 0;
-    }
-  } else if (remainingSeconds <= clampedFullSec) {
-    desired = targetVolume;
-  } else if (rampSec <= 0) {
-    desired = targetVolume;
-  } else {
-    const t = (fadeStartSec - remainingSeconds) / rampSec; // 0..1
-    desired = Math.max(0, Math.min(1, t)) * targetVolume;
-  }
-
+  const desired = calculateCountdownMusicVolume(remainingSeconds);
+  
   if (Number.isFinite(desired)) {
     a.volume = desired;
   }
@@ -214,20 +288,36 @@ function ensureCountdownBgHandlers() {
   const a = ensureBackgroundMusicAudio();
   if (!a || countdownBgBound) return;
   countdownBgBound = true;
+  
   a.addEventListener("ended", () => {
     if (!countdownBgQueue.length) return;
-    const { countdownRunning } = useStore.getState();
+    const { countdownRunning, countdownRemaining } = useStore.getState();
     if (!countdownRunning) return;
-    let attempts = 0;
-    while (attempts < countdownBgQueue.length) {
-      countdownBgIndex = (countdownBgIndex + 1) % countdownBgQueue.length;
-      const next = countdownBgQueue[countdownBgIndex];
-      if (next?.src) {
-        a.src = next.src;
-        a.play().catch(() => {});
-        return;
-      }
-      attempts++;
+    
+    // Move to next track in loop
+    countdownBgIndex = (countdownBgIndex + 1) % countdownBgQueue.length;
+    const next = countdownBgQueue[countdownBgIndex];
+    
+    if (next?.src) {
+      a.src = next.src;
+      a.currentTime = 0;
+      // Apply current volume based on remaining time
+      updateCountdownBgVolume(countdownRemaining || 0);
+      a.play().catch(() => {});
+    }
+  });
+  
+  // Handle timeupdate to check for skipSeconds (when starting mid-track)
+  a.addEventListener("timeupdate", () => {
+    const state = useStore.getState();
+    const skipSeconds = (state as any)._countdownSkipSeconds || 0;
+    if (skipSeconds > 0 && a.currentTime < skipSeconds) {
+      // Still in skip region, continue
+      return;
+    }
+    if (skipSeconds > 0 && a.currentTime >= skipSeconds) {
+      // Clear skip seconds after first use
+      (useStore as any).setState({ _countdownSkipSeconds: 0 });
     }
   });
 }
@@ -290,10 +380,11 @@ interface Store {
   countdownBackgroundMusicId: string | null; // deprecated (song-as-audio-path)
   countdownBackgroundPlaylistId: string | null;
   countdownBackgroundMusicVolume: number;
-  countdownBackgroundMusicFadeStartMinutes: number;
-  countdownBackgroundMusicFullVolumeMinutes: number;
-  countdownBackgroundMusicFadeInStartPercent: number; // Start volume percentage for fade-in (0-100)
-  countdownBackgroundMusicFadeInStartMinutes: number; // Start fade-in X minutes before 0:00
+  countdownBackgroundMusicStartMinutes: number; // Musik startet X Minuten vor 00
+  countdownBackgroundMusicStartVolumePercent: number; // Startlautstärke in Prozent (0-100)
+  countdownBackgroundMusicFadeInStartMinutes: number; // Fade-In beginnt X Minuten vor 00
+  countdownBackgroundMusicFullVolumeMinutes: number; // 100% Lautstärke ab X Minuten vor 00
+  countdownDisplayAfterZeroSeconds: number; // Countdown-Anzeige bleibt X Sekunden nach 00 sichtbar
   setCountdownLabel: (l: string) => void;
   setCountdownTargetTime: (t: string | null) => void;
   applyCountdownTargetTime: () => void;
@@ -301,10 +392,11 @@ interface Store {
   setCountdownBackgroundMusic: (id: string | null) => void;
   setCountdownBackgroundPlaylist: (id: string | null) => void;
   setCountdownBackgroundMusicVolume: (v: number) => void;
-  setCountdownBackgroundFadeStartMinutes: (m: number) => void;
-  setCountdownBackgroundFullVolumeMinutes: (m: number) => void;
-  setCountdownBackgroundFadeInStartPercent: (p: number) => void;
-  setCountdownBackgroundFadeInStartMinutes: (m: number) => void;
+  setCountdownBackgroundMusicStartMinutes: (m: number) => void;
+  setCountdownBackgroundMusicStartVolumePercent: (p: number) => void;
+  setCountdownBackgroundMusicFadeInStartMinutes: (m: number) => void;
+  setCountdownBackgroundMusicFullVolumeMinutes: (m: number) => void;
+  setCountdownDisplayAfterZeroSeconds: (s: number) => void;
   startCountdown: () => void;
   stopCountdown: () => void;
   resetCountdown: () => void;
@@ -661,11 +753,12 @@ export const useStore = create<Store>((set, get) => ({
   countdownTheme: "minimal",
   countdownBackgroundMusicId: null,
   countdownBackgroundPlaylistId: null,
-  countdownBackgroundMusicVolume: 0.6,
-  countdownBackgroundMusicFadeStartMinutes: 10,
-  countdownBackgroundMusicFullVolumeMinutes: 2,
-  countdownBackgroundMusicFadeInStartPercent: 0,
+  countdownBackgroundMusicVolume: 1.0,
+  countdownBackgroundMusicStartMinutes: 10,
+  countdownBackgroundMusicStartVolumePercent: 30,
   countdownBackgroundMusicFadeInStartMinutes: 5,
+  countdownBackgroundMusicFullVolumeMinutes: 2,
+  countdownDisplayAfterZeroSeconds: 10,
 
   setCountdownLabel: (l) => set({ countdownLabel: l }),
   setCountdownTargetTime: (t) => set({ countdownTargetTime: t }),
@@ -716,30 +809,55 @@ export const useStore = create<Store>((set, get) => ({
     set({ countdownBackgroundMusicId: id });
   },
   setCountdownBackgroundPlaylist: (id) => set({ countdownBackgroundPlaylistId: id }),
-  setCountdownBackgroundMusicVolume: (v) => set({ countdownBackgroundMusicVolume: normalizeVolume(v, 0.6) }),
-  setCountdownBackgroundFadeStartMinutes: (m) => set({ countdownBackgroundMusicFadeStartMinutes: normalizeMinutes(m, 10) }),
-  setCountdownBackgroundFullVolumeMinutes: (m) => set({ countdownBackgroundMusicFullVolumeMinutes: normalizeMinutes(m, 2) }),
-  setCountdownBackgroundFadeInStartPercent: (p) => set({ countdownBackgroundMusicFadeInStartPercent: Math.max(0, Math.min(100, p)) }),
-  setCountdownBackgroundFadeInStartMinutes: (m) => set({ countdownBackgroundMusicFadeInStartMinutes: normalizeMinutes(m, 5) }),
+  setCountdownBackgroundMusicVolume: (v) => set({ countdownBackgroundMusicVolume: normalizeVolume(v, 1.0) }),
+  setCountdownBackgroundMusicStartMinutes: (m) => set({ countdownBackgroundMusicStartMinutes: normalizeMinutes(m, 10) }),
+  setCountdownBackgroundMusicStartVolumePercent: (p) => set({ countdownBackgroundMusicStartVolumePercent: Math.max(0, Math.min(100, p)) }),
+  setCountdownBackgroundMusicFadeInStartMinutes: (m) => set({ countdownBackgroundMusicFadeInStartMinutes: normalizeMinutes(m, 5) }),
+  setCountdownBackgroundMusicFullVolumeMinutes: (m) => set({ countdownBackgroundMusicFullVolumeMinutes: normalizeMinutes(m, 2) }),
+  setCountdownDisplayAfterZeroSeconds: (s) => set({ countdownDisplayAfterZeroSeconds: Math.max(0, Math.min(60, s)) }),
 
   startCountdown: () => {
-    const { countdownTargetTime, countdownBackgroundPlaylistId, playlists } = get();
+    const { 
+      countdownTargetTime, 
+      countdownBackgroundPlaylistId, 
+      playlists, 
+      countdownBackgroundMusicStartMinutes,
+      countdownDisplayAfterZeroSeconds,
+    } = get();
 
     // Start background playlist if configured
     if (countdownBackgroundPlaylistId && countdownTargetTime) {
       const playlist = playlists.find((p) => p.id === countdownBackgroundPlaylistId);
       const tracks = playlist?.tracks ?? [];
       const playable = tracks.filter((t) => typeof t.src === "string" && t.src.trim());
+      
       if (playlist && playable.length > 0) {
         const a = ensureBackgroundMusicAudio();
         if (a) {
           ensureCountdownBgHandlers();
           countdownBgPlaylistId = playlist.id;
           countdownBgQueue = playable;
-          countdownBgIndex = 0;
-          a.src = playable[0].src!;
-          a.volume = 0;
-          a.play().catch(() => {});
+          
+          // Calculate remaining seconds
+          const diffSeconds = secondsUntilTargetTime(countdownTargetTime);
+          
+          // Calculate optimal starting position so last track ends at 00
+          const optimalStart = calculateOptimalPlaylistStart(diffSeconds, playable, 0);
+          countdownBgIndex = optimalStart.startIndex;
+          
+          // Store skip seconds for the first track
+          (useStore as any).setState({ _countdownSkipSeconds: optimalStart.skipSeconds });
+          
+          // Start with the first track at calculated position
+          const firstTrack = playable[countdownBgIndex];
+          if (firstTrack?.src) {
+            a.src = firstTrack.src;
+            a.currentTime = optimalStart.skipSeconds;
+            a.volume = 0; // Start silent, volume will be updated by interval
+            
+            // Try to play
+            a.play().catch(() => {});
+          }
         }
       }
     }
@@ -755,38 +873,109 @@ export const useStore = create<Store>((set, get) => ({
     }
 
     set({ countdownRunning: true });
+    
+    // Store the expected end time for fade-out logic
+    countdownEndTime = Date.now() + (get().countdownRemaining * 1000);
+    
     countdownInterval = setInterval(() => {
       const { countdownRemaining, countdownLabel, countdownLive, stopCountdown, countdownTheme, countdownTargetTime } = get();
       const next = countdownRemaining - 1;
       set({ countdownRemaining: Math.max(next, 0) });
       updateCountdownBgVolume(Math.max(next, 0));
+      
       if (countdownLive) {
         sendToOutput({
           mode: "countdown",
           countdown: { remaining: Math.max(next, 0), label: countdownLabel, running: true, theme: countdownTheme, targetTime: countdownTargetTime },
         });
       }
-      if (next <= 0) stopCountdown();
+      
+      if (next <= 0) {
+        stopCountdown();
+      }
     }, 1000);
   },
 
   stopCountdown: () => {
-    if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
+    if (countdownInterval) { 
+      clearInterval(countdownInterval); 
+      countdownInterval = null; 
+    }
+    
+    const { countdownRemaining, countdownLabel, countdownTheme, countdownTargetTime, countdownDisplayAfterZeroSeconds } = get();
+    
+    // Stop the music when countdown reaches 0
+    const a = ensureBackgroundMusicAudio();
+    if (a && countdownRemaining <= 0) {
+      try {
+        a.pause();
+        a.src = "";
+      } catch {
+        // ignore
+      }
+    }
+    
     set({ countdownRunning: false });
-    // Don't stop the music at 0:00 - let the current track finish playing
-    // stopCountdownBackgroundMusic();
-    const { countdownRemaining, countdownLabel, countdownTheme, countdownTargetTime } = get();
+    
+    // If countdown reached 0, keep display visible for configured seconds, then fade to black
+    if (countdownRemaining <= 0 && get().countdownLive) {
+      // Send final countdown state (at 0)
+      sendToOutput({
+        mode: "countdown",
+        countdown: { 
+          remaining: 0, 
+          label: countdownLabel, 
+          running: false, 
+          theme: countdownTheme, 
+          targetTime: countdownTargetTime,
+          isFadingOut: true,
+        },
+      });
+      
+      // After displayAfterZeroSeconds, fade out to black
+      if (countdownFadeOutTimeout) {
+        clearTimeout(countdownFadeOutTimeout);
+      }
+      
+      countdownFadeOutTimeout = setTimeout(() => {
+        sendToOutput({ mode: "blank" });
+        set({ outputMode: "blank", isBlackout: false });
+        countdownFadeOutTimeout = null;
+      }, countdownDisplayAfterZeroSeconds * 1000);
+      
+      return;
+    }
+    
+    // Countdown was stopped manually (not at 0)
     if (get().countdownLive) {
       sendToOutput({
         mode: "countdown",
-        countdown: { remaining: countdownRemaining, label: countdownLabel, running: false, theme: countdownTheme, targetTime: countdownTargetTime },
+        countdown: { 
+          remaining: countdownRemaining, 
+          label: countdownLabel, 
+          running: false, 
+          theme: countdownTheme, 
+          targetTime: countdownTargetTime,
+        },
       });
     }
   },
 
   resetCountdown: () => {
-    if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
+    if (countdownInterval) { 
+      clearInterval(countdownInterval); 
+      countdownInterval = null; 
+    }
+    
+    // Stop background music
     stopCountdownBackgroundMusic();
+    
+    // Clear fade-out timeout
+    if (countdownFadeOutTimeout) {
+      clearTimeout(countdownFadeOutTimeout);
+      countdownFadeOutTimeout = null;
+    }
+    
     const t = get().countdownTargetTime;
     let diffSeconds = 0;
     if (t) {
@@ -796,7 +985,13 @@ export const useStore = create<Store>((set, get) => ({
     if (get().countdownLive) {
       sendToOutput({
         mode: "countdown",
-        countdown: { remaining: diffSeconds, label: get().countdownLabel, running: false, theme: get().countdownTheme, targetTime: t },
+        countdown: { 
+          remaining: diffSeconds, 
+          label: get().countdownLabel, 
+          running: false, 
+          theme: get().countdownTheme, 
+          targetTime: t,
+        },
       });
     }
   },
@@ -1497,9 +1692,12 @@ export const useStore = create<Store>((set, get) => ({
           countdownTargetTime: parsed.countdownTargetTime ?? null,
           countdownTheme: parsed.countdownTheme ?? "minimal",
           countdownBackgroundPlaylistId: parsed.countdownBackgroundPlaylistId ?? null,
-          countdownBackgroundMusicVolume: normalizeVolume(parsed.countdownBackgroundMusicVolume, 0.6),
-          countdownBackgroundMusicFadeStartMinutes: normalizeMinutes(parsed.countdownBackgroundMusicFadeStartMinutes, 10),
+          countdownBackgroundMusicVolume: normalizeVolume(parsed.countdownBackgroundMusicVolume, 1.0),
+          countdownBackgroundMusicStartMinutes: normalizeMinutes(parsed.countdownBackgroundMusicStartMinutes, 10),
+          countdownBackgroundMusicStartVolumePercent: parsed.countdownBackgroundMusicStartVolumePercent ?? 30,
+          countdownBackgroundMusicFadeInStartMinutes: normalizeMinutes(parsed.countdownBackgroundMusicFadeInStartMinutes, 5),
           countdownBackgroundMusicFullVolumeMinutes: normalizeMinutes(parsed.countdownBackgroundMusicFullVolumeMinutes, 2),
+          countdownDisplayAfterZeroSeconds: parsed.countdownDisplayAfterZeroSeconds ?? 10,
           outputMonitorIndex: parsed.outputMonitorIndex ?? null,
         });
       }
@@ -1518,8 +1716,11 @@ export const useStore = create<Store>((set, get) => ({
         countdownTheme,
         countdownBackgroundPlaylistId,
         countdownBackgroundMusicVolume,
-        countdownBackgroundMusicFadeStartMinutes,
+        countdownBackgroundMusicStartMinutes,
+        countdownBackgroundMusicStartVolumePercent,
+        countdownBackgroundMusicFadeInStartMinutes,
         countdownBackgroundMusicFullVolumeMinutes,
+        countdownDisplayAfterZeroSeconds,
         outputMonitorIndex,
       } = get();
       localStorage.setItem(
@@ -1530,8 +1731,11 @@ export const useStore = create<Store>((set, get) => ({
           countdownTheme,
           countdownBackgroundPlaylistId,
           countdownBackgroundMusicVolume,
-          countdownBackgroundMusicFadeStartMinutes,
+          countdownBackgroundMusicStartMinutes,
+          countdownBackgroundMusicStartVolumePercent,
+          countdownBackgroundMusicFadeInStartMinutes,
           countdownBackgroundMusicFullVolumeMinutes,
+          countdownDisplayAfterZeroSeconds,
           outputMonitorIndex,
         })
       );
@@ -1664,7 +1868,14 @@ useStore.subscribe((state, prevState) => {
     state.countdownLabel !== prevState.countdownLabel ||
     state.countdownTargetTime !== prevState.countdownTargetTime ||
     state.countdownTheme !== prevState.countdownTheme ||
-    state.outputMonitorIndex !== prevState.outputMonitorIndex;
+    state.outputMonitorIndex !== prevState.outputMonitorIndex ||
+    state.countdownBackgroundPlaylistId !== prevState.countdownBackgroundPlaylistId ||
+    state.countdownBackgroundMusicVolume !== prevState.countdownBackgroundMusicVolume ||
+    state.countdownBackgroundMusicStartMinutes !== prevState.countdownBackgroundMusicStartMinutes ||
+    state.countdownBackgroundMusicStartVolumePercent !== prevState.countdownBackgroundMusicStartVolumePercent ||
+    state.countdownBackgroundMusicFadeInStartMinutes !== prevState.countdownBackgroundMusicFadeInStartMinutes ||
+    state.countdownBackgroundMusicFullVolumeMinutes !== prevState.countdownBackgroundMusicFullVolumeMinutes ||
+    state.countdownDisplayAfterZeroSeconds !== prevState.countdownDisplayAfterZeroSeconds;
 
   if (changed) state.saveSettings();
 });

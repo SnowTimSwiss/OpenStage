@@ -95,7 +95,14 @@ export interface OutputPayload {
   image?: { src: string };
   video?: { src: string; playing?: boolean; startTime?: number; endTime?: number };
   song?: { text: string; title: string; index: number; total: number };
-  countdown?: { remaining: number; label: string; running: boolean; theme?: CountdownTheme; targetTime?: string | null };
+  countdown?: { 
+    remaining: number; 
+    label: string; 
+    running: boolean; 
+    theme?: CountdownTheme; 
+    targetTime?: string | null;
+    isFadingOut?: boolean;
+  };
 }
 
 // ── Store ────────────────────────────────────────────────────────────────────
