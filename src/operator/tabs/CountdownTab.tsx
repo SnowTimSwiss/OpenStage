@@ -11,9 +11,10 @@ export default function CountdownTab() {
   const remaining = useStore((s) => s.countdownRemaining);
   const label = useStore((s) => s.countdownLabel);
   const running = useStore((s) => s.countdownRunning);
-  const live = useStore((s) => s.countdownLive);
   const targetTime = useStore((s) => s.countdownTargetTime);
   const theme = useStore((s) => s.countdownTheme);
+  const outputMode = useStore((s) => s.outputMode);
+  const isBlackout = useStore((s) => s.isBlackout);
   const playlists = useStore((s) => s.playlists);
   const backgroundPlaylistId = useStore((s) => s.countdownBackgroundPlaylistId);
   const bgVolume = useStore((s) => s.countdownBackgroundMusicVolume);
@@ -33,10 +34,9 @@ export default function CountdownTab() {
   const setFadeInStartMin = useStore((s) => s.setCountdownBackgroundMusicFadeInStartMinutes);
   const setFullMin = useStore((s) => s.setCountdownBackgroundMusicFullVolumeMinutes);
   const setDisplayAfterZero = useStore((s) => s.setCountdownDisplayAfterZeroSeconds);
-  const start = useStore((s) => s.startCountdown);
-  const setLive = useStore((s) => s.setCountdownLive);
 
   const urgent = remaining <= 10 && remaining > 0 && running;
+  const countdownOnOutput = outputMode === "countdown" && !isBlackout;
   const playlistOptions = playlists.map((p) => ({
     id: p.id,
     title: `${p.source === "spotify" ? "Spotify" : "Local"}: ${p.name} (${p.tracks.length})`,
@@ -50,23 +50,20 @@ export default function CountdownTab() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-6">
-        {/* Big Timer Display */}
         <div
           className="rounded-xl p-6 flex flex-col items-center gap-3"
-          style={{ 
-            background: theme === "bold" ? "#0a0a0a" : "#0d0d0d", 
+          style={{
+            background: theme === "bold" ? "#0a0a0a" : "#0d0d0d",
             border: "1px solid #1e1e1e",
             borderTop: theme === "bold" ? `3px solid ${urgent ? "#ef4444" : "#f97316"}` : "1px solid #1e1e1e",
           }}
         >
-          {/* Animated background for Aurora theme */}
           {theme === "default" && (
             <div className="absolute inset-0 overflow-hidden rounded-xl" style={{ pointerEvents: "none" }}>
               <div className="countdown-bg-aurora" style={{ opacity: 0.3 }} />
             </div>
           )}
 
-          {/* Theme icon */}
           <div className="text-3xl mb-1" style={{ filter: "drop-shadow(0 0 10px currentColor)" }}>
             {theme === "minimal" && "◐"}
             {theme === "default" && "◈"}
@@ -78,10 +75,10 @@ export default function CountdownTab() {
             style={{
               fontSize: "clamp(3rem, 8vw, 5rem)",
               fontFamily: "'JetBrains Mono', monospace",
-              color: urgent ? "#ef4444" : live ? "#f97316" : "#ffffff",
+              color: urgent ? "#ef4444" : countdownOnOutput ? "#f97316" : "#ffffff",
               transition: "color 0.3s, text-shadow 0.3s",
-              textShadow: urgent 
-                ? "0 0 40px #ef444480" 
+              textShadow: urgent
+                ? "0 0 40px #ef444480"
                 : theme === "bold"
                   ? "0 0 30px #f9731660"
                   : theme === "default"
@@ -95,19 +92,20 @@ export default function CountdownTab() {
           {targetTime && (
             <div className="text-xs flex items-center gap-1 relative z-10" style={{ color: "#666" }}>
               <span>🕐</span>
-              <span>Ziel: <span style={{ color: "#888" }}>{targetTime} Uhr</span></span>
+              <span>
+                Ziel: <span style={{ color: "#888" }}>{targetTime} Uhr</span>
+              </span>
             </div>
           )}
 
-          {live && (
+          {countdownOnOutput && (
             <div className="flex items-center gap-2 text-xs relative z-10" style={{ color: "#22c55e" }}>
               <span className="w-2 h-2 rounded-full bg-green-500 live-dot" />
-              <span className="font-medium">LIVE auf Beamer</span>
+              <span className="font-medium">Als Ausgabe aktiv</span>
             </div>
           )}
         </div>
 
-        {/* Label */}
         <div>
           <label className="text-xs font-medium block mb-2" style={{ color: "#666" }}>
             Anzeigetext
@@ -121,7 +119,6 @@ export default function CountdownTab() {
           />
         </div>
 
-        {/* Target time */}
         <div>
           <label className="text-xs font-medium block mb-2" style={{ color: "#666" }}>
             Zielzeit (Countdown endet um)
@@ -148,7 +145,6 @@ export default function CountdownTab() {
           </p>
         </div>
 
-        {/* Background Music */}
         <div>
           <label className="text-xs font-medium block mb-2" style={{ color: "#666" }}>
             🎵 Hintergrundmusik (endet bei 0:00)
@@ -166,7 +162,7 @@ export default function CountdownTab() {
               </option>
             ))}
           </select>
-          
+
           <div className="grid grid-cols-2 gap-2 mt-3">
             <div>
               <label className="text-[11px] block mb-1" style={{ color: "#666" }}>
@@ -185,7 +181,7 @@ export default function CountdownTab() {
 
             <div>
               <label className="text-[11px] block mb-1" style={{ color: "#666" }}>
-                Start-Lautstaerke (%)
+                Start-Lautstärke (%)
               </label>
               <input
                 type="number"
@@ -233,7 +229,7 @@ export default function CountdownTab() {
 
           <div className="mt-3">
             <label className="text-[11px] block mb-1" style={{ color: "#666" }}>
-              Max. Lautstaerke (%)
+              Max. Lautstärke (%)
             </label>
             <div className="flex items-center gap-2">
               <input
@@ -252,13 +248,11 @@ export default function CountdownTab() {
           </div>
 
           <p className="text-[11px] mt-2" style={{ color: "#555" }}>
-            Musik startet {musicStartMin} min vor 00 mit {startVolumePercent}% der max. Lautst&a;rke.
-            Ab {fadeInStartMin} min wird auf {Math.round(bgVolume * 100)}% eingeblendet.
-            Bei {fullMin} min ist Maximum erreicht.
+            Musik startet {musicStartMin} min vor 00 mit {startVolumePercent}% der max. Lautstärke. Ab {fadeInStartMin} min wird auf{" "}
+            {Math.round(bgVolume * 100)}% eingeblendet. Bei {fullMin} min ist Maximum erreicht.
           </p>
         </div>
 
-        {/* Display After Zero */}
         <div>
           <label className="text-xs font-medium block mb-2" style={{ color: "#666" }}>
             ⏱️ Anzeige nach 0:00
@@ -273,14 +267,15 @@ export default function CountdownTab() {
               className="w-24 text-sm px-2 py-2 rounded outline-none"
               style={{ background: "#141414", border: "1px solid #252525", color: "#ddd" }}
             />
-            <span className="text-xs" style={{ color: "#888" }}>Sekunden</span>
+            <span className="text-xs" style={{ color: "#888" }}>
+              Sekunden
+            </span>
           </div>
           <p className="text-[11px] mt-1" style={{ color: "#555" }}>
             Der Countdown bleibt nach 0:00 noch {displayAfterZero} Sekunden sichtbar, bevor er zu schwarz fadet.
           </p>
         </div>
 
-        {/* Themes */}
         <div>
           <label className="text-xs font-medium block mb-2" style={{ color: "#666" }}>
             Design (Beamer)
@@ -305,38 +300,9 @@ export default function CountdownTab() {
           </div>
         </div>
 
-        {/* Live toggle */}
         <div className="mt-auto">
-          <button
-            onClick={() => {
-              if (!live && targetTime) {
-                // Auto-start countdown when going live
-                start();
-              }
-              setLive(!live);
-            }}
-            className="w-full py-4 rounded-xl font-bold text-sm transition-all"
-            style={{
-              background: live ? "#14290a" : "#0a1a0a",
-              color: live ? "#22c55e" : "#444",
-              border: live ? "2px solid #22c55e60" : "2px solid #1a2a1a",
-              boxShadow: live ? "0 0 24px #22c55e30, inset 0 0 20px #22c55e10" : "none",
-            }}
-          >
-            {live ? (
-              <span className="flex items-center justify-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-green-500 live-dot" />
-                Countdown läuft auf Beamer
-              </span>
-            ) : (
-              <span className="flex items-center justify-center gap-2">
-                <span>◯</span>
-                Auf Beamer zeigen
-              </span>
-            )}
-          </button>
           <p className="text-[11px] text-center mt-2" style={{ color: "#555" }}>
-            {live ? "Countdown ist live sichtbar" : "Klicken um den Countdown zu starten"}
+            Countdown läuft im Hintergrund. Sichtbar wird er, wenn der aktive Ausgabe-Modus auf Countdown steht.
           </p>
         </div>
       </div>

@@ -5,6 +5,7 @@ const MODE_LABELS: Record<string, string> = {
   blank: "Nichts",
   blackout: "BLACKOUT",
   image: "Bild",
+  html: "Folie",
   video: "Video",
   song: "Liedtext",
   countdown: "Countdown",

@@ -2,12 +2,12 @@ import { useStore } from "../store/useStore";
 import type { TabId } from "../types";
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
-  { id: "media",     label: "Medien",    icon: "📁" },
-  { id: "songs",     label: "Lieder",    icon: "🎵" },
+  { id: "show", label: "Show", icon: "🎬" },
+  { id: "media", label: "Medien", icon: "📁" },
+  { id: "songs", label: "Lieder", icon: "🎵" },
   { id: "countdown", label: "Countdown", icon: "⏱️" },
-  { id: "music",     label: "Musik",     icon: "🎧" },
-  { id: "display",   label: "Display",   icon: "🖥️" },
-  { id: "show",      label: "Show",      icon: "🎬" },
+  { id: "music", label: "Musik", icon: "🎧" },
+  { id: "display", label: "Display", icon: "🖥️" },
 ];
 
 export default function Sidebar() {

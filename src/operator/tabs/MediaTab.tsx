@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../../store/useStore";
 import { openOutputWindow, sendVideoControl } from "../../lib/events";
+import PptxHtmlFrame from "../../components/PptxHtmlFrame";
 
 type FilterType = "all" | "image" | "video" | "pptx";
 
@@ -312,13 +313,15 @@ export default function MediaTab() {
                               <div className="aspect-video bg-black relative">
                                 <img
                                   data-slide-id={slide.id}
-	                                  src={retryImages[slide.id] ? (alternateAssetUrl(slide.src) ?? slide.src) : slide.src}
+	                                  src={slide.html ? "data:image/gif;base64,R0lGODlhAQABAAAAACw=" : (retryImages[slide.id] ? (alternateAssetUrl(slide.src) ?? slide.src) : slide.src)}
                                   alt={slide.name}
-                                  className="w-full h-full object-contain"
+                                  className={`w-full h-full object-contain ${slide.html ? "opacity-0" : ""}`}
                                   draggable={false}
-                                  onError={() => handleImageError(slide.id, slide.name, slide.src)}
+                                  onError={() => {
+                                    if (!slide.html) handleImageError(slide.id, slide.name, slide.src);
+                                  }}
                                 />
-	                                {imageErrors[slide.id] && (
+	                                {!slide.html && imageErrors[slide.id] && (
                                   <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">
                                     <div className="text-center">
                                       <span className="text-2xl">⚠️</span>
@@ -327,6 +330,7 @@ export default function MediaTab() {
                                     </div>
                                   </div>
                                 )}
+                                {slide.html && <PptxHtmlFrame html={slide.html} className="absolute inset-0 w-full h-full" />}
                               </div>
                               <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                 <span className="text-white text-xs font-bold">LIVE</span>
@@ -565,17 +569,21 @@ export default function MediaTab() {
 	                className="col-span-2 rounded-lg overflow-hidden flex items-center justify-center relative"
 	                style={{ background: "#000", border: "1px solid #1e1e1e" }}
 	              >
-	                <img
-	                  src={presentationCurrent.src}
-	                  alt=""
-	                  className="w-full h-full object-contain transition-all duration-300 ease-out draggable-false"
-	                  style={{
-	                    opacity: isTransitioning ? 0.5 : 1,
-	                    transform: isTransitioning ? "scale(0.98)" : "scale(1)",
-	                    filter: isTransitioning ? "blur(2px)" : "none",
-	                  }}
-	                  draggable={false}
-	                />
+	                {presentationCurrent.html ? (
+	                  <PptxHtmlFrame html={presentationCurrent.html} className="w-full h-full" />
+	                ) : (
+	                  <img
+	                    src={presentationCurrent.src}
+	                    alt=""
+	                    className="w-full h-full object-contain transition-all duration-300 ease-out draggable-false"
+	                    style={{
+	                      opacity: isTransitioning ? 0.5 : 1,
+	                      transform: isTransitioning ? "scale(0.98)" : "scale(1)",
+	                      filter: isTransitioning ? "blur(2px)" : "none",
+	                    }}
+	                    draggable={false}
+	                  />
+	                )}
 	              </div>
 
 	              <div className="col-span-1 flex flex-col gap-3">
@@ -588,16 +596,20 @@ export default function MediaTab() {
 	                  style={{ background: "#0a0a0a", border: "1px solid #1e1e1e" }}
 	                >
 	                  {presentationNext ? (
-	                    <img
-	                      src={presentationNext.src}
-	                      alt=""
-	                      className="w-full h-full object-contain transition-all duration-300 draggable-false"
-	                      style={{
-	                        opacity: isTransitioning ? 0.7 : 1,
-	                        transform: isTransitioning ? "scale(1.05)" : "scale(1)",
-	                      }}
-	                      draggable={false}
-	                    />
+	                    presentationNext.html ? (
+	                      <PptxHtmlFrame html={presentationNext.html} className="w-full h-full" />
+	                    ) : (
+	                      <img
+	                        src={presentationNext.src}
+	                        alt=""
+	                        className="w-full h-full object-contain transition-all duration-300 draggable-false"
+	                        style={{
+	                          opacity: isTransitioning ? 0.7 : 1,
+	                          transform: isTransitioning ? "scale(1.05)" : "scale(1)",
+	                        }}
+	                        draggable={false}
+	                      />
+	                    )
 	                  ) : (
 	                    <span className="text-xs" style={{ color: "#444" }}>Ende</span>
 	                  )}

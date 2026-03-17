@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useStore } from "../store/useStore";
 import Header from "./Header";
 import Sidebar from "./Sidebar";
@@ -8,16 +8,16 @@ import CountdownTab from "./tabs/CountdownTab";
 import MusicTab from "./tabs/MusicTab";
 import DisplayTab from "./tabs/DisplayTab";
 import ShowTab from "./tabs/ShowTab";
+import OutputRenderer from "../output/OutputRenderer";
+import type { OutputPayload } from "../types";
 
 export default function OperatorApp() {
   const activeTab = useStore((s) => s.activeTab);
 
-  // Fetch monitors once on startup (also restores output window placement).
   useEffect(() => {
     useStore.getState().fetchMonitors();
   }, []);
 
-  // Keyboard shortcuts
   useEffect(() => {
     const toggleBlackout = useStore.getState().toggleBlackout;
     const nextSlide = useStore.getState().nextSongSlide;
@@ -47,9 +47,7 @@ export default function OperatorApp() {
           {activeTab === "display" && <DisplayTab />}
           {activeTab === "show" && <ShowTab />}
         </main>
-
-        {/* Preview panel with music controls */}
-        <PreviewPanel />
+        {activeTab !== "show" && <PreviewPanel />}
       </div>
     </div>
   );
@@ -77,7 +75,6 @@ function PreviewPanel() {
   const activeVideoId = useStore((s) => s.activeVideoId);
   const videos = useStore((s) => s.videos);
 
-  // Music state
   const music = useStore((s) => s.music);
   const musicIndex = useStore((s) => s.musicIndex);
   const musicPlaying = useStore((s) => s.musicPlaying);
@@ -89,6 +86,7 @@ function PreviewPanel() {
   const playPrevMusic = useStore((s) => s.playPrevMusic);
   const seekMusic = useStore((s) => s.seekMusic);
   const setMusicVolume = useStore((s) => s.setMusicVolume);
+  const previewVideoRef = useRef<HTMLVideoElement>(null);
 
   const activeSong = songs.find((s) => s.id === activeSongId);
   const activeSlide =
@@ -101,79 +99,54 @@ function PreviewPanel() {
   const currentTime = Math.min(musicCurrentTime, duration || musicCurrentTime);
   const progress = duration > 0 ? currentTime / duration : 0;
 
-  // Countdown theme styles for preview
-  const getPreviewStyles = () => {
-    if (outputMode !== "countdown") return {};
-    
-    const urgent = countdownRemaining <= 10 && countdownRemaining > 0;
-    
-    if (countdownTheme === "minimal") {
+  const previewPayload = useMemo<OutputPayload>(() => {
+    if (isBlackout) return { mode: "blackout" };
+    if ((outputMode === "image" || outputMode === "html") && activeSlide) {
+      if (activeSlide.html) {
+        return { mode: "html", html: { content: activeSlide.html } };
+      }
+      return { mode: "image", image: { src: activeSlide.src } };
+    }
+    if (outputMode === "song" && activeSong) {
+      const slide = activeSong.slides[activeSongSlide];
+      if (slide) {
+        return {
+          mode: "song",
+          song: {
+            text: slide.text,
+            title: activeSong.title,
+            index: activeSongSlide,
+            total: activeSong.slides.length,
+          },
+        };
+      }
+    }
+    if (outputMode === "countdown") {
       return {
-        timeStyle: {
-          fontSize: "clamp(2rem, 5vw, 3rem)",
-          fontFamily: "'JetBrains Mono', monospace",
-          fontWeight: 600,
-          color: urgent ? "#ef4444" : "#ffffff",
-        } as React.CSSProperties,
-        labelStyle: {
-          fontSize: "0.6rem",
-          color: "#888",
-          textTransform: "uppercase" as const,
-          letterSpacing: "0.1em",
-        } as React.CSSProperties,
-        containerStyle: {
-          background: "#000",
-        } as React.CSSProperties,
+        mode: "countdown",
+        countdown: {
+          remaining: countdownRemaining,
+          label: countdownLabel,
+          running: true,
+          theme: countdownTheme,
+        },
       };
     }
-    
-    if (countdownTheme === "default") {
-      return {
-        timeStyle: {
-          fontSize: "clamp(2rem, 5vw, 3rem)",
-          fontFamily: "'JetBrains Mono', monospace",
-          fontWeight: 700,
-          color: urgent ? "#ef4444" : "#ffffff",
-          textShadow: urgent ? "0 0 20px #ef444480" : "0 0 15px #f9731633",
-        } as React.CSSProperties,
-        labelStyle: {
-          fontSize: "0.6rem",
-          color: "#888",
-          textTransform: "uppercase" as const,
-          letterSpacing: "0.1em",
-        } as React.CSSProperties,
-        containerStyle: {
-          background: "linear-gradient(135deg, #0a0a0a 0%, #111 100%)",
-        } as React.CSSProperties,
-      };
+    if (outputMode === "video" && activeVideo) {
+      return { mode: "video", video: { src: activeVideo.src, playing: true } };
     }
-    
-    if (countdownTheme === "bold") {
-      return {
-        timeStyle: {
-          fontSize: "clamp(2rem, 5vw, 3rem)",
-          fontFamily: "'JetBrains Mono', monospace",
-          fontWeight: 800,
-          color: urgent ? "#ef4444" : "#ffffff",
-          textShadow: urgent ? "0 0 20px #ef444480" : "0 0 15px #f9731640",
-        } as React.CSSProperties,
-        labelStyle: {
-          fontSize: "0.65rem",
-          color: "#aaa",
-          textTransform: "uppercase" as const,
-          letterSpacing: "0.2em",
-        } as React.CSSProperties,
-        containerStyle: {
-          background: "#000",
-          borderTop: `3px solid ${urgent ? "#ef4444" : "#f97316"}`,
-        } as React.CSSProperties,
-      };
-    }
-    
-    return {};
-  };
-
-  const previewStyles = getPreviewStyles();
+    return { mode: "blank" };
+  }, [
+    isBlackout,
+    outputMode,
+    activeSlide,
+    activeSong,
+    activeSongSlide,
+    countdownRemaining,
+    countdownLabel,
+    countdownTheme,
+    activeVideo,
+  ]);
 
   return (
     <div
@@ -186,58 +159,15 @@ function PreviewPanel() {
         </span>
       </div>
 
-      {/* Preview screen */}
       <div className="p-3">
         <div
-          className="w-full rounded-lg overflow-hidden flex items-center justify-center relative"
-          style={{
-            aspectRatio: "16/9",
-            background: isBlackout ? "#000" : "#0a0a0a",
-            border: "1px solid #1e1e1e",
-            ...previewStyles.containerStyle,
-          }}
+          className="w-full rounded-lg overflow-hidden relative"
+          style={{ aspectRatio: "16/9", background: "#0a0a0a", border: "1px solid #1e1e1e" }}
         >
-          {isBlackout ? (
-            <span className="text-xs font-bold" style={{ color: "#ef4444" }}>BLACKOUT</span>
-          ) : outputMode === "image" && activeSlide ? (
-            <img src={activeSlide.src} alt="" className="w-full h-full object-contain" />
-          ) : outputMode === "song" && activeSong ? (
-            <div className="p-3 text-center w-full flex flex-col items-center justify-center h-full">
-              <p
-                className="text-white leading-snug whitespace-pre-line"
-                style={{
-                  fontSize: "clamp(0.7rem, 2vw, 1rem)",
-                  fontFamily: "'Sora', sans-serif",
-                  fontWeight: 300,
-                  textShadow: "0 2px 10px rgba(0,0,0,0.8)",
-                }}
-              >
-                {activeSong.slides[activeSongSlide]?.text}
-              </p>
-            </div>
-          ) : outputMode === "countdown" ? (
-            <div className="flex flex-col items-center gap-1 p-2">
-              {countdownLabel && (
-                <span style={previewStyles.labelStyle}>{countdownLabel}</span>
-              )}
-              <span style={previewStyles.timeStyle}>
-                {formatTime(countdownRemaining)}
-              </span>
-            </div>
-          ) : outputMode === "video" && activeVideo ? (
-            <div className="flex flex-col items-center gap-2">
-              <span className="text-2xl">🎬</span>
-              <span className="text-[9px] text-gray-400 max-w-[90%] truncate">{activeVideo.name}</span>
-            </div>
-          ) : outputMode === "video" ? (
-            <span className="text-2xl">🎬</span>
-          ) : (
-            <span className="text-xs" style={{ color: "#333" }}>Kein Output</span>
-          )}
+          <OutputRenderer state={previewPayload} embedded compact muteVideo videoRef={previewVideoRef} />
         </div>
       </div>
 
-      {/* Status */}
       <div className="px-3 py-2 flex flex-col gap-2">
         <div className="text-[11px]" style={{ color: "#444" }}>
           Modus:{" "}
@@ -247,10 +177,7 @@ function PreviewPanel() {
         </div>
         {outputMode === "song" && activeSong && (
           <div className="text-[11px]" style={{ color: "#444" }}>
-            Folie{" "}
-            <span style={{ color: "#888" }}>
-              {activeSongSlide + 1}/{activeSong.slides.length}
-            </span>
+            Folie <span style={{ color: "#888" }}>{activeSongSlide + 1}/{activeSong.slides.length}</span>
           </div>
         )}
         {outputMode === "video" && activeVideo && (
@@ -260,13 +187,12 @@ function PreviewPanel() {
         )}
       </div>
 
-      {/* Music Controls */}
       {currentMusic && (
         <div className="px-3 py-3 border-t" style={{ borderColor: "#1a1a1a" }}>
           <div className="text-[10px] uppercase tracking-widest mb-2" style={{ color: "#555" }}>
             Musik
           </div>
-          
+
           <div className="text-xs font-medium truncate mb-2" style={{ color: "#ddd" }} title={currentMusic.name}>
             {currentMusic.name}
           </div>
@@ -300,7 +226,6 @@ function PreviewPanel() {
             </button>
           </div>
 
-          {/* Progress */}
           <div className="mb-2">
             <div className="flex items-center justify-between text-[9px] font-mono mb-1" style={{ color: "#666" }}>
               <span>{formatTime(currentTime)}</span>
@@ -323,7 +248,6 @@ function PreviewPanel() {
             </div>
           </div>
 
-          {/* Volume */}
           <div className="flex items-center gap-2">
             <span className="text-[9px]" style={{ color: "#666" }}>🔊</span>
             <input
@@ -335,7 +259,7 @@ function PreviewPanel() {
               onChange={(e) => setMusicVolume(Number(e.target.value))}
               className="flex-1 h-1"
               style={{
-                background: "linear-gradient(to right, #f97316 0%, #f97316 " + (musicVolume * 100) + "%, #1a1a1a " + (musicVolume * 100) + "%, #1a1a1a 100%)",
+                background: `linear-gradient(to right, #f97316 0%, #f97316 ${musicVolume * 100}%, #1a1a1a ${musicVolume * 100}%, #1a1a1a 100%)`,
                 borderRadius: "2px",
                 outline: "none",
               }}
@@ -344,7 +268,6 @@ function PreviewPanel() {
         </div>
       )}
 
-      {/* Shortcut hints */}
       <div className="mt-auto px-3 py-3 border-t" style={{ borderColor: "#1a1a1a" }}>
         <div className="text-[10px] flex flex-col gap-1.5" style={{ color: "#333" }}>
           <div><kbd className="px-1 py-0.5 rounded text-[9px]" style={{ background: "#1a1a1a", color: "#555" }}>B</kbd> Blackout</div>

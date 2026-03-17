@@ -1,20 +1,13 @@
 use serde::{Deserialize, Serialize};
-use std::io::Read;
+use std::io::{Read, Seek};
 use std::path::PathBuf;
-use tauri::Listener;
+use tauri::{Manager, WindowEvent};
 use zip::read::ZipArchive;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpotifyAuthResponse {
     pub code: String,
     pub state: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct LibreOfficeStatus {
-    pub installed: bool,
-    pub path: Option<String>,
-    pub version: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -51,7 +44,69 @@ fn cleanup_pptx_temp_files() {
     }
 }
 
+fn collect_slide_numbers_from_archive<R: Read + Seek>(archive: &mut ZipArchive<R>) -> Vec<u32> {
+    let mut numbers = Vec::new();
+    for idx in 0..archive.len() {
+        if let Ok(file) = archive.by_index(idx) {
+            let name = file.name().replace("\\", "/");
+            if let Some(rest) = name.strip_prefix("ppt/slides/slide") {
+                if let Some(num_str) = rest.strip_suffix(".xml") {
+                    if let Ok(n) = num_str.parse::<u32>() {
+                        numbers.push(n);
+                    }
+                }
+            }
+        }
+    }
+    numbers.sort_unstable();
+    numbers.dedup();
+    numbers
+}
+
+#[cfg(any())]
+fn count_pptx_slides(path: &str) -> usize {
+    let file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return 0,
+    };
+    let mut archive = match ZipArchive::new(file) {
+        Ok(a) => a,
+        Err(_) => return 0,
+    };
+
+    let numbers = collect_slide_numbers_from_archive(&mut archive);
+    if !numbers.is_empty() {
+        return numbers.len();
+    }
+
+    archive
+        .by_name("ppt/presentation.xml")
+        .ok()
+        .and_then(|mut f| {
+            let mut content = String::new();
+            f.read_to_string(&mut content).ok()?;
+            let count = content.matches("<p:sldId").count();
+            if count > 0 {
+                Some(count)
+            } else {
+                Some(content.matches("<p:slideId").count())
+            }
+        })
+        .unwrap_or(0)
+}
+
+#[cfg(any())]
+fn path_to_file_url(path: &std::path::Path) -> String {
+    let mut raw = path.to_string_lossy().replace('\\', "/");
+    if !raw.starts_with('/') {
+        raw = format!("/{}", raw);
+    }
+    let encoded = raw.replace(' ', "%20");
+    format!("file://{}", encoded)
+}
+
 /// Get LibreOffice installation status
+#[cfg(any())]
 fn find_libreoffice() -> Option<PathBuf> {
     // Check common installation paths
     let paths = [
@@ -88,32 +143,8 @@ fn find_libreoffice() -> Option<PathBuf> {
     None
 }
 
-#[tauri::command]
-fn check_libreoffice_installed() -> LibreOfficeStatus {
-    if let Some(path) = find_libreoffice() {
-        LibreOfficeStatus {
-            installed: true,
-            path: Some(path.to_string_lossy().to_string()),
-            // Running `soffice --version` can block or pop up a console on some Windows installs.
-            // We only need to know whether it's present; version is optional.
-            version: None,
-        }
-    } else {
-        LibreOfficeStatus {
-            installed: false,
-            path: None,
-            version: None,
-        }
-    }
-}
-
-#[tauri::command]
-fn get_libreoffice_download_url() -> String {
-    // Return the official download URL
-    String::from("https://www.libreoffice.org/download/download/")
-}
-
-#[tauri::command]
+#[allow(dead_code)]
+#[cfg(any())]
 fn import_pptx_with_libreoffice(
     _app: tauri::AppHandle,
     path: String,
@@ -140,45 +171,212 @@ fn import_pptx_with_libreoffice(
         d
     };
 
-    // Convert PPTX to images using LibreOffice
-    // soffice --headless --convert-to png --outdir /tmp/slides presentation.pptx
-    let mut cmd = Command::new(&libreoffice_path);
-    cmd.args([
-        "--headless",
-        "--convert-to", "png",
-        "--outdir", out_dir.to_str().ok_or("Invalid output directory")?,
-        &path,
-    ]);
+    let expected_slide_count = count_pptx_slides(&path);
 
-    // Hide console window on Windows
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
+    let work_dir = out_dir.join("lo-work");
+    std::fs::create_dir_all(&work_dir)
+        .map_err(|e| format!("Failed to create LibreOffice work dir: {}", e))?;
+    let rendered_dir = out_dir.join("rendered");
+    std::fs::create_dir_all(&rendered_dir)
+        .map_err(|e| format!("Failed to create rendered dir: {}", e))?;
+    let profile_dir = out_dir.join("lo-profile");
+    std::fs::create_dir_all(&profile_dir)
+        .map_err(|e| format!("Failed to create LibreOffice profile dir: {}", e))?;
+    let profile_url = path_to_file_url(&profile_dir);
 
-    let output = cmd.output()
-        .map_err(|e| format!("Failed to run LibreOffice: {}", e))?;
+    let read_pngs = |dir: &PathBuf| -> Vec<PathBuf> {
+        let mut result: Vec<PathBuf> = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext.eq_ignore_ascii_case("png"))
+                    .unwrap_or(false)
+                {
+                    result.push(path);
+                }
+            }
+        }
+        result.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+        result
+    };
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("LibreOffice conversion failed: {}", stderr));
-    }
+    let clear_pngs = |dir: &PathBuf| {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let is_png = path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext.eq_ignore_ascii_case("png"))
+                    .unwrap_or(false);
+                if is_png {
+                    let _ = std::fs::remove_file(path);
+                }
+            }
+        }
+    };
 
-    // Find all generated PNG files
+    let run_convert = |filter: &str| -> Result<std::process::Output, String> {
+        let mut cmd = Command::new(&libreoffice_path);
+        cmd.args([
+            &format!("-env:UserInstallation={}", profile_url),
+            "--headless",
+            "--nologo",
+            "--nolockcheck",
+            "--norestore",
+            "--nodefault",
+            "--convert-to", filter,
+            "--outdir", work_dir.to_str().ok_or("Invalid output directory")?,
+            &path,
+        ]);
+
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        cmd.output()
+            .map_err(|e| format!("Failed to run LibreOffice: {}", e))
+    };
+
     let mut slide_images: Vec<PathBuf> = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&out_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().map_or(false, |ext| ext == "png") {
-                slide_images.push(path);
+    let mut last_stderr = String::new();
+    let all_images_identical = |paths: &[PathBuf]| -> bool {
+        if paths.len() <= 1 {
+            return false;
+        }
+        let first = std::fs::read(&paths[0]).ok();
+        let Some(first_bytes) = first else { return false };
+        paths
+            .iter()
+            .skip(1)
+            .all(|p| std::fs::read(p).map(|b| b == first_bytes).unwrap_or(false))
+    };
+
+    // Prefer deterministic per-slide export so multi-slide decks don't collapse to a single image.
+    if expected_slide_count > 0 {
+        for slide_num in 1..=expected_slide_count {
+            clear_pngs(&work_dir);
+
+            let per_slide_filters = [
+                format!(
+                    "png:impress_png_Export:{{\"PageNumber\":{{\"type\":\"long\",\"value\":\"{}\"}}}}",
+                    slide_num
+                ),
+                format!(
+                    "png:draw_png_Export:{{\"PageNumber\":{{\"type\":\"long\",\"value\":\"{}\"}}}}",
+                    slide_num
+                ),
+                format!("png:impress_png_Export:PageNumber={}", slide_num),
+                format!("png:draw_png_Export:PageNumber={}", slide_num),
+                format!(
+                    "png:impress_png_Export:{{\"PageRange\":{{\"type\":\"string\",\"value\":\"{}-{}\"}}}}",
+                    slide_num, slide_num
+                ),
+                format!(
+                    "png:draw_png_Export:{{\"PageRange\":{{\"type\":\"string\",\"value\":\"{}-{}\"}}}}",
+                    slide_num, slide_num
+                ),
+                format!("png:impress_png_Export:PageRange={}-{}", slide_num, slide_num),
+                format!("png:draw_png_Export:PageRange={}-{}", slide_num, slide_num),
+                format!(
+                    "png:impress_png_Export:{{\"PageNumber\":{{\"type\":\"long\",\"value\":\"{}\"}}}}",
+                    slide_num.saturating_sub(1)
+                ),
+                format!(
+                    "png:draw_png_Export:{{\"PageNumber\":{{\"type\":\"long\",\"value\":\"{}\"}}}}",
+                    slide_num.saturating_sub(1)
+                ),
+            ];
+
+            let mut exported: Option<PathBuf> = None;
+            for filter in per_slide_filters {
+                let output = run_convert(&filter)?;
+                if !output.status.success() {
+                    last_stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                    continue;
+                }
+
+                let images = read_pngs(&work_dir);
+                let Some(image_path) = images.first() else { continue };
+
+                let ext = image_path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("png")
+                    .to_ascii_lowercase();
+                let mut stable_path = rendered_dir.clone();
+                stable_path.push(format!("slide-{:03}.{}", slide_num, ext));
+                std::fs::copy(image_path, &stable_path)
+                    .map_err(|e| format!("Failed to persist rendered slide: {}", e))?;
+                exported = Some(stable_path);
+                break;
+            }
+
+            if let Some(image_path) = exported {
+                slide_images.push(image_path);
+            } else {
+                slide_images.clear();
+                break;
             }
         }
     }
 
-    // Sort by filename
-    slide_images.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    // If filter options were ignored and every rendered file is identical,
+    // force fallback path instead of importing duplicated slide 1.
+    if slide_images.len() > 1 && all_images_identical(&slide_images) {
+        slide_images.clear();
+    }
+
+    if slide_images.is_empty() {
+        let filters = ["png", "png:impress_png_Export", "png:draw_png_Export"];
+        let mut best_images: Vec<PathBuf> = Vec::new();
+
+        for filter in filters {
+            clear_pngs(&work_dir);
+            let output = run_convert(filter)?;
+
+            if !output.status.success() {
+                last_stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                continue;
+            }
+
+            let images = read_pngs(&work_dir);
+            if images.len() > best_images.len() {
+                best_images = images;
+            }
+
+            if expected_slide_count > 0 && best_images.len() >= expected_slide_count {
+                break;
+            }
+        }
+
+        if best_images.is_empty() {
+            if let Ok(parsed) = import_pptx(path.clone()) {
+                if !parsed.slides.is_empty() {
+                    return Ok(parsed);
+                }
+            }
+            return Err(format!("LibreOffice conversion failed: {}", last_stderr));
+        }
+
+        // LibreOffice can export only one image for some decks/settings.
+        // Prefer internal importer only when it actually yields better results.
+        if expected_slide_count > 1 && best_images.len() <= 1 {
+            if let Ok(parsed) = import_pptx(path.clone()) {
+                if !parsed.slides.is_empty() {
+                    return Ok(parsed);
+                }
+            }
+        }
+
+        slide_images = best_images;
+    }
 
     // Extract presenter notes from the PPTX file (ZIP archive)
     let file = std::fs::File::open(&path)
@@ -448,20 +646,10 @@ fn import_pptx(path: String) -> Result<PptxFile, String> {
         d
     };
 
-    // Get slide count from presentation.xml
-    let slide_count = archive
-        .by_name("ppt/presentation.xml")
-        .ok()
-        .and_then(|mut f| {
-            let mut content = String::new();
-            f.read_to_string(&mut content).ok()?;
-            // Count slide relationships
-            Some(content.matches("<p:slideId").count())
-        })
-        .unwrap_or(0);
+    let slide_numbers = collect_slide_numbers_from_archive(&mut archive);
 
     // Extract slide images using slide relationship files (more reliable than guessing).
-    for slide_num in 1..=(slide_count as u32) {
+    for slide_num in slide_numbers {
         let rels_path = format!("ppt/slides/_rels/slide{}.xml.rels", slide_num);
         let mut rels_xml = String::new();
         if let Ok(mut rels_file) = archive.by_name(&rels_path) {
@@ -611,20 +799,19 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
-            // Clean up temp files on exit
-            let app_handle = app.handle().clone();
-            app_handle.listen("tauri://before-close", move |_| {
-                cleanup_pptx_temp_files();
-            });
-            Ok(())
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { .. } = event {
+                if window.label() == "main" {
+                    if let Some(output) = window.app_handle().get_webview_window("output") {
+                        let _ = output.close();
+                    }
+                    cleanup_pptx_temp_files();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             get_monitors,
             import_pptx,
-            import_pptx_with_libreoffice,
-            check_libreoffice_installed,
-            get_libreoffice_download_url,
             start_spotify_auth_server
         ])
         .run(tauri::generate_context!())

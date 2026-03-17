@@ -1,7 +1,8 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../../store/useStore";
 import { sendToOutput } from "../../lib/events";
-import type { ShowItem } from "../../types";
+import OutputRenderer from "../../output/OutputRenderer";
+import type { OutputPayload, ShowItem } from "../../types";
 
 export default function ShowTab() {
   const slides = useStore((s) => s.slides);
@@ -17,16 +18,18 @@ export default function ShowTab() {
   const addToShowQueue = useStore((s) => s.addToShowQueue);
   const removeFromShowQueue = useStore((s) => s.removeFromShowQueue);
   const setShowCurrentIndex = useStore((s) => s.setShowCurrentIndex);
-  const updateShowItemSlideIndex = useStore((s) => s.updateShowItemSlideIndex);
   const showNextSlide = useStore((s) => s.showNextSlide);
   const showPreviousSlide = useStore((s) => s.showPreviousSlide);
   const reorderShowQueue = useStore((s) => s.reorderShowQueue);
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-  const dragOverIndex = useRef<number | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const previewVideoRef = useRef<HTMLVideoElement>(null);
+  const queueListRef = useRef<HTMLDivElement>(null);
+  const draggedIndexRef = useRef<number | null>(null);
+  const lastHoverIndexRef = useRef<number | null>(null);
 
-  // Keyboard controls
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
@@ -50,73 +53,53 @@ export default function ShowTab() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [showNextSlide, showPreviousSlide]);
 
-  // Play current item when index or slideIndex changes
   useEffect(() => {
     if (showCurrentIndex < 0 || showCurrentIndex >= showQueue.length) return;
     const item = showQueue[showCurrentIndex];
-    playShowItem(item);
-  }, [showCurrentIndex, showQueue]);
-
-  function playShowItem(item: ShowItem) {
-    switch (item.type) {
-      case "image": {
-        const slide = slides.find((s) => s.id === item.refId);
-        if (slide) {
-          sendToOutput({ mode: "image", image: { src: slide.src } });
-        }
-        break;
-      }
-      case "video": {
-        const video = videos.find((v) => v.id === item.refId);
-        if (video) {
-          sendToOutput({ mode: "video", video: { src: video.src, playing: true } });
-        }
-        break;
-      }
-      case "song": {
-        const song = songs.find((s) => s.id === item.refId);
-        if (song) {
-          const slideIdx = item.slideIndex ?? 0;
-          const slide = song.slides[slideIdx];
-          if (slide) {
-            sendToOutput({
-              mode: "song",
-              song: {
-                text: slide.text,
-                title: song.title,
-                index: slideIdx,
-                total: song.slides.length,
-              },
-            });
-          }
-        }
-        break;
-      }
-      case "pptx": {
-        const group = pptxGroups.find((g) => g.id === item.refId);
-        if (group) {
-          const slideIdx = item.slideIndex ?? 0;
-          const slide = group.slides[slideIdx];
-          if (slide) {
-            sendToOutput({ mode: "image", image: { src: slide.src } });
-          }
-        }
-        break;
-      }
-      case "countdown": {
-        sendToOutput({
-          mode: "countdown",
-          countdown: {
-            remaining: countdownRemaining,
-            label: countdownLabel,
-            running: true,
-            theme: countdownTheme,
-          },
-        });
-        break;
-      }
+    const payload = buildOutputPayload(item, {
+      slides,
+      videos,
+      songs,
+      pptxGroups,
+      countdownRemaining,
+      countdownLabel,
+      countdownTheme,
+    });
+    const current = useStore.getState();
+    if (current.outputMode !== payload.mode || current.isBlackout) {
+      useStore.setState({ outputMode: payload.mode, isBlackout: false });
     }
-  }
+    sendToOutput(payload);
+  }, [
+    showCurrentIndex,
+    showQueue,
+    slides,
+    videos,
+    songs,
+    pptxGroups,
+    countdownRemaining,
+    countdownLabel,
+    countdownTheme,
+  ]);
+
+  const currentItem =
+    showCurrentIndex >= 0 && showCurrentIndex < showQueue.length ? showQueue[showCurrentIndex] : null;
+
+  const previewPayload = useMemo(
+    () =>
+      currentItem
+        ? buildOutputPayload(currentItem, {
+            slides,
+            videos,
+            songs,
+            pptxGroups,
+            countdownRemaining,
+            countdownLabel,
+            countdownTheme,
+          })
+        : { mode: "blank" as const },
+    [currentItem, slides, videos, songs, pptxGroups, countdownRemaining, countdownLabel, countdownTheme]
+  );
 
   function handleAddItem(type: ShowItem["type"], refId?: string) {
     const label = getItemLabel(type, refId, slides, videos, songs, pptxGroups);
@@ -135,53 +118,133 @@ export default function ShowTab() {
     setShowCurrentIndex(index);
   }
 
-  // Drag & Drop handlers
-  function handleDragStart(e: React.DragEvent, index: number) {
-    setDraggedIndex(index);
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", index.toString());
-  }
-
-  function handleDragOver(e: React.DragEvent, index: number) {
-    e.preventDefault();
-    dragOverIndex.current = index;
-  }
-
-  function handleDrop(e: React.DragEvent, dropIndex: number) {
-    e.preventDefault();
-    if (draggedIndex === null || draggedIndex === dropIndex) {
+  function moveDraggedItem(sourceIndex: number | null, targetIndex: number) {
+    if (sourceIndex === null || sourceIndex === targetIndex) {
       setDraggedIndex(null);
-      dragOverIndex.current = null;
+      setDropIndex(null);
+      draggedIndexRef.current = null;
+      lastHoverIndexRef.current = null;
+      return;
+    }
+    if (sourceIndex < 0 || sourceIndex >= showQueue.length) {
+      setDraggedIndex(null);
+      setDropIndex(null);
+      draggedIndexRef.current = null;
+      lastHoverIndexRef.current = null;
       return;
     }
 
-    // Use store's reorder function
-    reorderShowQueue(draggedIndex, dropIndex);
-    
-    // Adjust current index if needed
-    if (showCurrentIndex === draggedIndex) {
-      setShowCurrentIndex(dropIndex);
-    } else if (draggedIndex < showCurrentIndex && dropIndex >= showCurrentIndex) {
+    const adjustedTargetIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
+    const boundedTargetIndex = Math.max(0, Math.min(showQueue.length - 1, adjustedTargetIndex));
+    reorderShowQueue(sourceIndex, boundedTargetIndex);
+
+    if (showCurrentIndex === sourceIndex) {
+      setShowCurrentIndex(boundedTargetIndex);
+    } else if (sourceIndex < showCurrentIndex && boundedTargetIndex >= showCurrentIndex) {
       setShowCurrentIndex(showCurrentIndex - 1);
-    } else if (draggedIndex > showCurrentIndex && dropIndex <= showCurrentIndex) {
+    } else if (sourceIndex > showCurrentIndex && boundedTargetIndex <= showCurrentIndex) {
       setShowCurrentIndex(showCurrentIndex + 1);
     }
 
     setDraggedIndex(null);
-    dragOverIndex.current = null;
+    setDropIndex(null);
+    draggedIndexRef.current = null;
+    lastHoverIndexRef.current = null;
+  }
+
+  function moveItemToFinalIndex(sourceIndex: number, targetIndex: number) {
+    if (
+      sourceIndex < 0 ||
+      sourceIndex >= showQueue.length ||
+      targetIndex < 0 ||
+      targetIndex >= showQueue.length ||
+      sourceIndex === targetIndex
+    ) {
+      return;
+    }
+
+    reorderShowQueue(sourceIndex, targetIndex);
+
+    if (showCurrentIndex === sourceIndex) {
+      setShowCurrentIndex(targetIndex);
+    } else if (sourceIndex < showCurrentIndex && targetIndex >= showCurrentIndex) {
+      setShowCurrentIndex(showCurrentIndex - 1);
+    } else if (sourceIndex > showCurrentIndex && targetIndex <= showCurrentIndex) {
+      setShowCurrentIndex(showCurrentIndex + 1);
+    }
+  }
+
+  function handleDragStart(e: React.DragEvent, index: number) {
+    setDraggedIndex(index);
+    setDropIndex(index);
+    draggedIndexRef.current = index;
+    lastHoverIndexRef.current = index;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(index));
   }
 
   function handleDragEnd() {
+    const source = draggedIndexRef.current;
+    const target = dropIndex ?? lastHoverIndexRef.current;
+    if (
+      source !== null &&
+      target !== null &&
+      target !== source
+    ) {
+      moveDraggedItem(source, target);
+      return;
+    }
     setDraggedIndex(null);
-    dragOverIndex.current = null;
+    setDropIndex(null);
+    draggedIndexRef.current = null;
+    lastHoverIndexRef.current = null;
   }
 
-  const currentItem = showCurrentIndex >= 0 && showCurrentIndex < showQueue.length
-    ? showQueue[showCurrentIndex]
-    : null;
+  function getDropTargetIndex(e: React.DragEvent, index: number) {
+    const target = e.currentTarget as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    const offsetY = e.clientY - rect.top;
+    return offsetY > rect.height / 2 ? index + 1 : index;
+  }
 
-  // Get total slides for current item
-  const getTotalSlides = (item: ShowItem) => {
+  function getDropIndexFromClientY(clientY: number) {
+    const root = queueListRef.current;
+    if (!root) return showQueue.length;
+
+    const items = Array.from(root.querySelectorAll<HTMLElement>("[data-queue-item='true']"));
+    for (const item of items) {
+      const idx = Number(item.dataset.index);
+      if (!Number.isInteger(idx)) continue;
+      const rect = item.getBoundingClientRect();
+      if (clientY < rect.top + rect.height / 2) return idx;
+    }
+
+    return showQueue.length;
+  }
+
+  function handleQueueDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const target = getDropIndexFromClientY(e.clientY);
+    lastHoverIndexRef.current = target;
+    if (dropIndex !== target) setDropIndex(target);
+  }
+
+  function handleQueueDrop(e: React.DragEvent) {
+    e.preventDefault();
+    moveDraggedItem(getDraggedIndex(e), getDropIndexFromClientY(e.clientY));
+  }
+
+  function getDraggedIndex(e: React.DragEvent) {
+    const raw = e.dataTransfer.getData("text/plain");
+    const parsed = Number(raw);
+    if (Number.isInteger(parsed) && parsed >= 0) {
+      return parsed;
+    }
+    return draggedIndexRef.current;
+  }
+
+  function getTotalSlides(item: ShowItem) {
     if (item.type === "song" && item.refId) {
       const song = songs.find((s) => s.id === item.refId);
       return song?.slides.length ?? 1;
@@ -191,34 +254,27 @@ export default function ShowTab() {
       return group?.slides.length ?? 1;
     }
     return 1;
-  };
+  }
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: "#252525" }}>
         <h2 className="text-sm font-semibold text-white">Show Mode</h2>
         <div className="flex items-center gap-2">
           <span className="text-[10px]" style={{ color: "#555" }}>
-            ← → Slides &nbsp;•&nbsp; ↑↓ Items
+            ← → Slides • ↑↓ Items
           </span>
           <button
             onClick={() => setIsAddModalOpen(true)}
             className="text-xs px-3 py-1.5 rounded-lg font-medium transition-all"
-            style={{
-              background: "#f97316",
-              color: "white",
-              border: "1px solid #f97316",
-            }}
+            style={{ background: "#f97316", color: "white", border: "1px solid #f97316" }}
           >
             + Add to Show
           </button>
         </div>
       </div>
 
-      {/* Main content */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Left: Show Queue (30%) */}
         <div className="w-[30%] flex flex-col border-r" style={{ borderColor: "#252525" }}>
           <div className="px-3 py-2 border-b" style={{ borderColor: "#1a1a1a" }}>
             <span className="text-[10px] uppercase tracking-widest font-medium" style={{ color: "#555" }}>
@@ -226,7 +282,12 @@ export default function ShowTab() {
             </span>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1">
+          <div
+            ref={queueListRef}
+            className="flex-1 overflow-y-auto p-2 flex flex-col gap-1"
+            onDragOver={handleQueueDragOver}
+            onDrop={handleQueueDrop}
+          >
             {showQueue.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-center px-4">
                 <span className="text-3xl mb-2">📋</span>
@@ -234,99 +295,151 @@ export default function ShowTab() {
                   No items in queue
                 </p>
                 <p className="text-[10px] mt-1" style={{ color: "#444" }}>
-                  Click "Add to Show" or drag from Media/Songs
+                  Click "Add to Show" to build the running order.
                 </p>
               </div>
             ) : (
-              showQueue.map((item, index) => {
-                const isActive = index === showCurrentIndex;
-                const totalSlides = getTotalSlides(item);
-                const currentSlide = (item.slideIndex ?? 0) + 1;
+              <>
+                {showQueue.map((item, index) => {
+                  const isActive = index === showCurrentIndex;
+                  const isDragging = draggedIndex === index;
+                  const totalSlides = getTotalSlides(item);
+                  const currentSlide = (item.slideIndex ?? 0) + 1;
+                  const showDropBefore = draggedIndex !== null && dropIndex === index && draggedIndex !== index;
 
-                return (
-                  <div
-                    key={item.id}
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, index)}
-                    onDragOver={(e) => handleDragOver(e, index)}
-                    onDrop={(e) => handleDrop(e, index)}
-                    onDragEnd={handleDragEnd}
-                    onClick={() => handleItemClick(index)}
-                    className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all border ${
-                      isActive
-                        ? "bg-[#f9731620] border-[#f9731640]"
-                        : draggedIndex === index
-                          ? "bg-[#222] border-[#444] opacity-50"
-                          : "bg-[#141414] border-[#1e1e1e] hover:border-[#333]"
-                    }`}
-                  >
-                    {/* Drag handle */}
-                    <span className="text-[10px] cursor-grab active:cursor-grabbing" style={{ color: "#444" }}>
-                      ⋮⋮
-                    </span>
-                    
-                    <span className="text-lg">{getItemIcon(item.type)}</span>
-                    
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-xs font-medium truncate ${isActive ? "text-[#f97316]" : "text-[#ccc]"}`}>
-                        {item.label}
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <p className="text-[9px]" style={{ color: "#555" }}>
-                          {item.type}
-                        </p>
-                        {(item.type === "song" || item.type === "pptx") && (
-                          <span className="text-[9px] px-1 rounded" style={{ background: "#222", color: "#666" }}>
-                            {currentSlide}/{totalSlides}
+                  return (
+                    <div key={item.id} className="flex flex-col" data-queue-item="true" data-index={index}>
+                      <div
+                        onDragEnter={() => {
+                          if (dropIndex !== index) setDropIndex(index);
+                          lastHoverIndexRef.current = index;
+                        }}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = "move";
+                          if (dropIndex !== index) setDropIndex(index);
+                          lastHoverIndexRef.current = index;
+                        }}
+                        className={`h-3 rounded transition-all ${showDropBefore ? "bg-[#f97316]" : "bg-transparent"}`}
+                      />
+                      <div
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, index)}
+                        onDragEnter={(e) => {
+                          const target = getDropTargetIndex(e, index);
+                          if (dropIndex !== target) setDropIndex(target);
+                          lastHoverIndexRef.current = target;
+                        }}
+                        onDragEnd={handleDragEnd}
+                        onClick={() => handleItemClick(index)}
+                        className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all border ${
+                          isActive
+                            ? "bg-[#f9731620] border-[#f9731640]"
+                            : isDragging
+                              ? "bg-[#222] border-[#444] opacity-50"
+                              : "bg-[#141414] border-[#1e1e1e] hover:border-[#333]"
+                        }`}
+                      >
+                        <span className="text-[10px] cursor-grab active:cursor-grabbing select-none" style={{ color: "#444" }}>
+                          ⋮⋮
+                        </span>
+                        <span className="text-lg">{getItemIcon(item.type)}</span>
+
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-xs font-medium truncate ${isActive ? "text-[#f97316]" : "text-[#ccc]"}`}>
+                            {item.label}
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-[9px]" style={{ color: "#555" }}>
+                              {item.type}
+                            </p>
+                            {(item.type === "song" || item.type === "pptx") && (
+                              <span className="text-[9px] px-1 rounded" style={{ background: "#222", color: "#666" }}>
+                                {currentSlide}/{totalSlides}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {isActive && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: "#f97316", color: "white" }}>
+                            LIVE
                           </span>
                         )}
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            moveItemToFinalIndex(index, index - 1);
+                          }}
+                          disabled={index === 0}
+                          className="text-[10px] px-1.5 py-0.5 rounded disabled:opacity-30"
+                          style={{ color: "#777", border: "1px solid #2a2a2a", background: "#181818" }}
+                          title="Nach oben"
+                        >
+                          ↑
+                        </button>
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            moveItemToFinalIndex(index, index + 1);
+                          }}
+                          disabled={index === showQueue.length - 1}
+                          className="text-[10px] px-1.5 py-0.5 rounded disabled:opacity-30"
+                          style={{ color: "#777", border: "1px solid #2a2a2a", background: "#181818" }}
+                          title="Nach unten"
+                        >
+                          ↓
+                        </button>
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeFromShowQueue(item.id);
+                          }}
+                          className="text-[10px] p-1 rounded hover:bg-[#222]"
+                          style={{ color: "#555" }}
+                        >
+                          ✕
+                        </button>
                       </div>
                     </div>
-                    
-                    {isActive && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: "#f97316", color: "white" }}>
-                        LIVE
-                      </span>
-                    )}
-                    
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeFromShowQueue(item.id);
-                      }}
-                      className="text-[10px] p-1 rounded hover:bg-[#222]"
-                      style={{ color: "#555" }}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                );
-              })
+                  );
+                })}
+
+                <div
+                  onDragEnter={() => {
+                    if (dropIndex !== showQueue.length) setDropIndex(showQueue.length);
+                    lastHoverIndexRef.current = showQueue.length;
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    if (dropIndex !== showQueue.length) setDropIndex(showQueue.length);
+                    lastHoverIndexRef.current = showQueue.length;
+                  }}
+                  className={`h-3 rounded transition-all ${
+                    draggedIndex !== null && dropIndex === showQueue.length ? "bg-[#f97316]" : "bg-transparent"
+                  }`}
+                />
+              </>
             )}
           </div>
 
-          {/* Navigation controls */}
           {showQueue.length > 0 && (
             <div className="px-3 py-2 border-t flex items-center gap-2" style={{ borderColor: "#1a1a1a" }}>
               <button
                 onClick={showPreviousSlide}
                 className="flex-1 text-xs py-1.5 rounded-lg transition-all"
-                style={{
-                  background: "#222",
-                  color: "#ccc",
-                  border: "1px solid #333",
-                }}
+                style={{ background: "#222", color: "#ccc", border: "1px solid #333" }}
               >
                 ← Prev
               </button>
               <button
                 onClick={showNextSlide}
                 className="flex-1 text-xs py-1.5 rounded-lg transition-all"
-                style={{
-                  background: "#f97316",
-                  color: "white",
-                  border: "1px solid #f97316",
-                }}
+                style={{ background: "#f97316", color: "white", border: "1px solid #f97316" }}
               >
                 Next →
               </button>
@@ -334,7 +447,6 @@ export default function ShowTab() {
           )}
         </div>
 
-        {/* Right: Preview (70%) */}
         <div className="flex-1 flex flex-col">
           <div className="px-3 py-2 border-b" style={{ borderColor: "#1a1a1a" }}>
             <span className="text-[10px] uppercase tracking-widest font-medium" style={{ color: "#555" }}>
@@ -344,19 +456,8 @@ export default function ShowTab() {
 
           <div className="flex-1 flex items-center justify-center p-4">
             {currentItem ? (
-              <div className="w-full h-full max-h-[500px] aspect-video bg-[#0a0a0a] rounded-lg border border-[#1e1e1e] flex items-center justify-center overflow-hidden relative">
-                <PreviewContent
-                  item={currentItem}
-                  slides={slides}
-                  videos={videos}
-                  songs={songs}
-                  pptxGroups={pptxGroups}
-                  countdownLabel={countdownLabel}
-                  countdownRemaining={countdownRemaining}
-                  countdownTheme={countdownTheme}
-                />
-                
-                {/* Slide indicator for songs/pptx */}
+              <div className="w-full h-full max-h-[500px] aspect-video bg-[#0a0a0a] rounded-lg border border-[#1e1e1e] overflow-hidden relative">
+                <OutputRenderer state={previewPayload} embedded muteVideo videoRef={previewVideoRef} />
                 {(currentItem.type === "song" || currentItem.type === "pptx") && (
                   <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2">
                     <span className="text-[10px] px-2 py-1 rounded" style={{ background: "#222", color: "#888" }}>
@@ -372,13 +473,12 @@ export default function ShowTab() {
                   No item selected
                 </p>
                 <p className="text-xs mt-1" style={{ color: "#444" }}>
-                  Click an item in the queue to preview
+                  Click an item in the queue to preview it.
                 </p>
               </div>
             )}
           </div>
 
-          {/* Current item info */}
           {currentItem && (
             <div className="px-4 py-3 border-t" style={{ borderColor: "#1a1a1a" }}>
               <div className="flex items-center justify-between">
@@ -418,7 +518,6 @@ export default function ShowTab() {
         </div>
       </div>
 
-      {/* Add to Show Modal */}
       {isAddModalOpen && (
         <AddToShowModal
           slides={slides}
@@ -433,15 +532,79 @@ export default function ShowTab() {
   );
 }
 
-// ── Helper Components ──────────────────────────────────────────────────────
+function buildOutputPayload(
+  item: ShowItem,
+  data: {
+    slides: any[];
+    videos: any[];
+    songs: any[];
+    pptxGroups: any[];
+    countdownRemaining: number;
+    countdownLabel: string;
+    countdownTheme: any;
+  }
+): OutputPayload {
+  const { slides, videos, songs, pptxGroups, countdownRemaining, countdownLabel, countdownTheme } = data;
+
+  switch (item.type) {
+    case "image": {
+      const slide = slides.find((s) => s.id === item.refId);
+      return slide ? { mode: "image", image: { src: slide.src } } : { mode: "blank" };
+    }
+    case "video": {
+      const video = videos.find((v) => v.id === item.refId);
+      return video ? { mode: "video", video: { src: video.src, playing: true } } : { mode: "blank" };
+    }
+    case "song": {
+      const song = songs.find((s) => s.id === item.refId);
+      if (!song) return { mode: "blank" };
+      const slideIdx = item.slideIndex ?? 0;
+      const slide = song.slides[slideIdx];
+      if (!slide) return { mode: "blank" };
+      return {
+        mode: "song",
+        song: {
+          text: slide.text,
+          title: song.title,
+          index: slideIdx,
+          total: song.slides.length,
+        },
+      };
+    }
+    case "pptx": {
+      const group = pptxGroups.find((g) => g.id === item.refId);
+      if (!group) return { mode: "blank" };
+      const slideIdx = item.slideIndex ?? 0;
+      const slide = group.slides[slideIdx];
+      if (!slide) return { mode: "blank" };
+      if (slide.html) return { mode: "html", html: { content: slide.html } };
+      return { mode: "image", image: { src: slide.src } };
+    }
+    case "countdown":
+      return {
+        mode: "countdown",
+        countdown: {
+          remaining: countdownRemaining,
+          label: countdownLabel,
+          running: true,
+          theme: countdownTheme,
+        },
+      };
+  }
+}
 
 function getItemIcon(type: ShowItem["type"]): string {
   switch (type) {
-    case "image": return "🖼️";
-    case "video": return "🎬";
-    case "song": return "🎵";
-    case "countdown": return "⏱️";
-    case "pptx": return "📊";
+    case "image":
+      return "🖼️";
+    case "video":
+      return "🎬";
+    case "song":
+      return "🎵";
+    case "countdown":
+      return "⏱️";
+    case "pptx":
+      return "📊";
   }
 }
 
@@ -475,94 +638,6 @@ function getItemLabel(
   }
 }
 
-function PreviewContent({
-  item,
-  slides,
-  videos,
-  songs,
-  pptxGroups,
-  countdownLabel,
-  countdownRemaining,
-  countdownTheme,
-}: {
-  item: ShowItem;
-  slides: any[];
-  videos: any[];
-  songs: any[];
-  pptxGroups: any[];
-  countdownLabel: string;
-  countdownRemaining: number;
-  countdownTheme: any;
-}) {
-  switch (item.type) {
-    case "image": {
-      const slide = slides.find((s) => s.id === item.refId);
-      if (slide) {
-        return <img src={slide.src} alt="" className="max-w-full max-h-full object-contain" />;
-      }
-      return <span className="text-4xl">🖼️</span>;
-    }
-    case "video": {
-      const video = videos.find((v) => v.id === item.refId);
-      if (video) {
-        return (
-          <div className="flex flex-col items-center gap-2">
-            <span className="text-4xl">🎬</span>
-            <span className="text-xs text-gray-400">{video.name}</span>
-          </div>
-        );
-      }
-      return <span className="text-4xl">🎬</span>;
-    }
-    case "song": {
-      const song = songs.find((s) => s.id === item.refId);
-      if (song) {
-        const slideIdx = item.slideIndex ?? 0;
-        const slide = song.slides[slideIdx];
-        if (slide) {
-          return (
-            <div className="p-6 text-center max-w-[80%]">
-              <p className="text-white text-lg whitespace-pre-line" style={{ textShadow: "0 2px 10px rgba(0,0,0,0.8)" }}>
-                {slide.text}
-              </p>
-              {slide.label && (
-                <p className="text-xs mt-3" style={{ color: "#666" }}>{slide.label}</p>
-              )}
-            </div>
-          );
-        }
-      }
-      return <span className="text-4xl">🎵</span>;
-    }
-    case "pptx": {
-      const group = pptxGroups.find((g) => g.id === item.refId);
-      if (group) {
-        const slideIdx = item.slideIndex ?? 0;
-        const slide = group.slides[slideIdx];
-        if (slide) {
-          return <img src={slide.src} alt="" className="max-w-full max-h-full object-contain" />;
-        }
-      }
-      return <span className="text-4xl">📊</span>;
-    }
-    case "countdown": {
-      return (
-        <div className="text-center">
-          <p className="text-xs uppercase tracking-widest mb-2" style={{ color: "#666" }}>
-            {countdownLabel || "Countdown"}
-          </p>
-          <p className="text-4xl font-mono" style={{ color: "#f97316" }}>
-            {String(Math.floor(countdownRemaining / 60)).padStart(2, "0")}:
-            {String(countdownRemaining % 60).padStart(2, "0")}
-          </p>
-        </div>
-      );
-    }
-  }
-}
-
-// ── Add to Show Modal ──────────────────────────────────────────────────────
-
 interface AddToShowModalProps {
   slides: any[];
   videos: any[];
@@ -582,7 +657,6 @@ function AddToShowModal({ slides, videos, songs, pptxGroups, onAdd, onClose }: A
         style={{ background: "#1a1a1a", border: "1px solid #333" }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: "#333" }}>
           <h3 className="text-sm font-semibold text-white">Add to Show</h3>
           <button onClick={onClose} className="text-xs px-2 py-1 rounded hover:bg-[#333]" style={{ color: "#888" }}>
@@ -590,7 +664,6 @@ function AddToShowModal({ slides, videos, songs, pptxGroups, onAdd, onClose }: A
           </button>
         </div>
 
-        {/* Tabs */}
         <div className="flex border-b" style={{ borderColor: "#333" }}>
           <button
             onClick={() => setActiveSection("media")}
@@ -626,7 +699,6 @@ function AddToShowModal({ slides, videos, songs, pptxGroups, onAdd, onClose }: A
           </button>
         </div>
 
-        {/* Content */}
         <div className="flex-1 overflow-y-auto p-3">
           {activeSection === "media" && (
             <div className="space-y-3">

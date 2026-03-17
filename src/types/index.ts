@@ -21,6 +21,7 @@ export interface MediaItem {
   name: string;
   path: string;
   src: string; // convertFileSrc or base64 result
+  html?: string; // optional HTML slide content for PPTX imports
   type: MediaType;
   groupId?: string; // For PPTX groups
   duration?: number; // For videos (seconds)
@@ -84,6 +85,7 @@ export type OutputMode =
   | "blank"
   | "blackout"
   | "image"
+  | "html"
   | "video"
   | "song"
   | "countdown";
@@ -93,6 +95,7 @@ export type CountdownTheme = "default" | "minimal" | "bold";
 export interface OutputPayload {
   mode: OutputMode;
   image?: { src: string };
+  html?: { content: string };
   video?: { src: string; playing?: boolean; startTime?: number; endTime?: number };
   song?: { text: string; title: string; index: number; total: number };
   countdown?: { 

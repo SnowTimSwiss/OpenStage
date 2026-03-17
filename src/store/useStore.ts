@@ -77,6 +77,9 @@ let countdownBgPlaylistId: string | null = null;
 let countdownBgQueue: MusicItem[] = [];
 let countdownBgIndex = 0;
 let countdownBgBound = false;
+let countdownBgStarted = false;
+let countdownBgStarting = false;
+let countdownBgStartOffsetSeconds = 0;
 let countdownEndTime: number | null = null;
 let countdownFadeOutTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -135,6 +138,9 @@ function stopCountdownBackgroundMusic() {
   countdownBgPlaylistId = null;
   countdownBgQueue = [];
   countdownBgIndex = 0;
+  countdownBgStarted = false;
+  countdownBgStarting = false;
+  countdownBgStartOffsetSeconds = 0;
   if (!a) return;
   try {
     a.pause();
@@ -247,6 +253,45 @@ function calculateCountdownMusicVolume(remainingSeconds: number): number {
   return targetVolume;
 }
 
+function getEffectiveTrackDuration(track: MusicItem): number {
+  const rawDuration = Number(track.duration || 0);
+  if (!Number.isFinite(rawDuration) || rawDuration <= 0) {
+    return track.source === "spotify" && track.src ? 30 : 0;
+  }
+
+  // Spotify preview URLs are only ~30 seconds long, even though the API returns
+  // the full track duration. For countdown alignment we need the actual playable length.
+  if (track.source === "spotify" && track.src) {
+    return Math.min(rawDuration, 30);
+  }
+
+  return rawDuration;
+}
+
+async function resolveCountdownQueueDurations(queue: MusicItem[]): Promise<MusicItem[]> {
+  const resolved = await Promise.all(
+    queue.map(async (track) => {
+      const effective = getEffectiveTrackDuration(track);
+      if (effective > 0) {
+        return { ...track, duration: effective };
+      }
+
+      if (!track.src) {
+        return track;
+      }
+
+      try {
+        const duration = await getAudioDuration(track.src);
+        return { ...track, duration };
+      } catch {
+        return track;
+      }
+    })
+  );
+
+  return resolved;
+}
+
 /**
  * Berechnet die optimale Startposition in der Playlist, sodass das letzte Lied genau bei 00 endet.
  * 
@@ -260,56 +305,159 @@ function calculateOptimalPlaylistStart(
   queue: MusicItem[],
   startIndex: number
 ): { startIndex: number; skipSeconds: number } {
-  if (queue.length === 0) {
+  if (queue.length === 0 || remainingSeconds <= 0) {
     return { startIndex: 0, skipSeconds: 0 };
   }
 
-  // Calculate total playlist duration
-  const totalDuration = queue.reduce((sum, track) => sum + (track.duration || 0), 0);
-  
+  const totalDuration = queue.reduce((sum, track) => sum + getEffectiveTrackDuration(track), 0);
   if (totalDuration <= 0) {
     return { startIndex: 0, skipSeconds: 0 };
   }
 
-  // Find the best starting point
-  // We want: remainingSeconds = duration from startIndex to end (with loops)
-  // With looping, we need to find where in the loop cycle we should start
-  
   const loopsNeeded = Math.ceil(remainingSeconds / totalDuration);
   const effectiveDuration = loopsNeeded * totalDuration;
   const secondsToFill = effectiveDuration - remainingSeconds;
-  
-  // Find which track to start at
   let accumulatedTime = 0;
   let optimalIndex = startIndex;
   let skipSeconds = 0;
-  
+
   for (let i = 0; i < queue.length; i++) {
     const trackIndex = (startIndex + i) % queue.length;
     const track = queue[trackIndex];
-    const trackDuration = track.duration || 0;
-    
+    const trackDuration = getEffectiveTrackDuration(track);
+
     if (accumulatedTime + trackDuration >= secondsToFill) {
       optimalIndex = trackIndex;
-      skipSeconds = secondsToFill - accumulatedTime;
+      skipSeconds = Math.max(0, secondsToFill - accumulatedTime);
       break;
     }
-    
+
     accumulatedTime += trackDuration;
   }
-  
-  return { startIndex: optimalIndex, skipSeconds: Math.max(0, skipSeconds) };
+
+  return { startIndex: optimalIndex, skipSeconds };
 }
 
 function updateCountdownBgVolume(remainingSeconds: number) {
   const a = ensureBackgroundMusicAudio();
   if (!a) return;
 
-  const desired = calculateCountdownMusicVolume(remainingSeconds);
+  const { outputMode, isBlackout } = useStore.getState();
+  const shouldBeAudible = outputMode === "countdown" && !isBlackout;
+  const desired = shouldBeAudible ? calculateCountdownMusicVolume(remainingSeconds) : 0;
   
   if (Number.isFinite(desired)) {
     a.volume = desired;
   }
+}
+
+function isCountdownOutputActive() {
+  const { outputMode, isBlackout } = useStore.getState();
+  return outputMode === "countdown" && !isBlackout;
+}
+
+function sendCurrentCountdownToOutput(
+  overrides: {
+    remaining?: number;
+    label?: string;
+    running?: boolean;
+    theme?: CountdownTheme;
+    targetTime?: string | null;
+    isFadingOut?: boolean;
+  } = {},
+  force = false
+) {
+  const state = useStore.getState();
+  if (!force && !isCountdownOutputActive()) return;
+
+  sendToOutput({
+    mode: "countdown",
+    countdown: {
+      remaining: state.countdownRemaining,
+      label: state.countdownLabel,
+      running: state.countdownRunning,
+      theme: state.countdownTheme,
+      targetTime: state.countdownTargetTime,
+      ...overrides,
+    },
+  });
+}
+
+function clearCountdownFadeOutTimeout() {
+  if (countdownFadeOutTimeout) {
+    clearTimeout(countdownFadeOutTimeout);
+    countdownFadeOutTimeout = null;
+  }
+}
+
+function playCountdownBackgroundTrack(track: MusicItem | undefined, startSeconds = 0) {
+  const a = ensureBackgroundMusicAudio();
+  if (!a || !track?.src) return;
+
+  const safeStartSeconds = Math.max(0, startSeconds);
+
+  const beginPlayback = () => {
+    try {
+      if (Number.isFinite(a.duration) && a.duration > 0) {
+        a.currentTime = Math.min(safeStartSeconds, Math.max(0, a.duration - 0.05));
+      } else {
+        a.currentTime = safeStartSeconds;
+      }
+    } catch {
+      // ignore seek issues until metadata is available
+    }
+
+    updateCountdownBgVolume(useStore.getState().countdownRemaining || 0);
+    a.play().catch(() => {});
+  };
+
+  try {
+    a.pause();
+  } catch {
+    // ignore
+  }
+
+  a.src = track.src;
+  a.load();
+
+  if (safeStartSeconds > 0) {
+    a.addEventListener("loadedmetadata", beginPlayback, { once: true });
+    return;
+  }
+
+  beginPlayback();
+}
+
+function maybeStartCountdownBackgroundMusic(remainingSeconds: number) {
+  if (countdownBgStarted || countdownBgStarting || !countdownBgQueue.length) return;
+
+  const startSec = Math.max(0, useStore.getState().countdownBackgroundMusicStartMinutes) * 60;
+  if (remainingSeconds > startSec) return;
+
+  countdownBgStarting = true;
+  void (async () => {
+    try {
+      const hydratedQueue = await resolveCountdownQueueDurations(countdownBgQueue);
+      countdownBgQueue = hydratedQueue;
+
+      const state = useStore.getState();
+      if (!state.countdownRunning) return;
+
+      const liveRemaining = countdownEndTime
+        ? Math.max(0, Math.ceil((countdownEndTime - Date.now()) / 1000))
+        : Math.max(0, remainingSeconds);
+
+      if (liveRemaining <= 0) return;
+
+      const optimalStart = calculateOptimalPlaylistStart(liveRemaining, countdownBgQueue, 0);
+      countdownBgIndex = optimalStart.startIndex;
+      countdownBgStartOffsetSeconds = optimalStart.skipSeconds;
+      countdownBgStarted = true;
+      playCountdownBackgroundTrack(countdownBgQueue[countdownBgIndex], countdownBgStartOffsetSeconds);
+    } finally {
+      countdownBgStarting = false;
+    }
+  })();
 }
 
 function ensureCountdownBgHandlers() {
@@ -320,33 +468,14 @@ function ensureCountdownBgHandlers() {
   a.addEventListener("ended", () => {
     if (!countdownBgQueue.length) return;
     const { countdownRunning, countdownRemaining } = useStore.getState();
-    if (!countdownRunning) return;
+    const reachedEndTime = countdownEndTime !== null && Date.now() >= countdownEndTime - 150;
+    if (!countdownRunning || countdownRemaining <= 0 || reachedEndTime) return;
     
     // Move to next track in loop
     countdownBgIndex = (countdownBgIndex + 1) % countdownBgQueue.length;
     const next = countdownBgQueue[countdownBgIndex];
-    
-    if (next?.src) {
-      a.src = next.src;
-      a.currentTime = 0;
-      // Apply current volume based on remaining time
-      updateCountdownBgVolume(countdownRemaining || 0);
-      a.play().catch(() => {});
-    }
-  });
-  
-  // Handle timeupdate to check for skipSeconds (when starting mid-track)
-  a.addEventListener("timeupdate", () => {
-    const state = useStore.getState();
-    const skipSeconds = (state as any)._countdownSkipSeconds || 0;
-    if (skipSeconds > 0 && a.currentTime < skipSeconds) {
-      // Still in skip region, continue
-      return;
-    }
-    if (skipSeconds > 0 && a.currentTime >= skipSeconds) {
-      // Clear skip seconds after first use
-      (useStore as any).setState({ _countdownSkipSeconds: 0 });
-    }
+
+    playCountdownBackgroundTrack(next, 0);
   });
 }
 
@@ -656,32 +785,12 @@ export const useStore = create<Store>((set, get) => ({
 
   loadPptx: async () => {
     const { setLoading, setError, clearError } = get();
-    const { invoke } = await import("@tauri-apps/api/core");
-    const { openUrl } = await import("@tauri-apps/plugin-opener");
     
     try {
       setLoading(true);
       clearError();
-      
-      // Check if LibreOffice is installed
-      const loStatus = await invoke<any>("check_libreoffice_installed");
-      
-      if (!loStatus.installed) {
-        // Show install prompt
-        const userConfirmed = window.confirm(
-          "LibreOffice wird benötigt, um PowerPoint-Dateien zu importieren.\n\n" +
-          "Möchten Sie LibreOffice jetzt herunterladen?\n\n" +
-          "LibreOffice ist eine kostenlose Open-Source-Office-Suite, die PPTX-Dateien verarbeiten kann."
-        );
-        
-        if (userConfirmed) {
-          const downloadUrl = await invoke<string>("get_libreoffice_download_url");
-          await openUrl(downloadUrl);
-        }
-        
-        setLoading(false);
-        return;
-      }
+      const { readFile } = await import("@tauri-apps/plugin-fs");
+      const { pptxToHtml } = await import("@jvmr/pptx-to-html");
       
       const files = await openDialog({
         multiple: true,
@@ -693,22 +802,32 @@ export const useStore = create<Store>((set, get) => ({
       for (const file of arr) {
         const filePath = file as string;
         
-        // Import PPTX using LibreOffice
-        const pptxFile = await invoke<any>("import_pptx_with_libreoffice", { path: filePath });
+        const raw = await readFile(filePath);
+        const bytes = raw instanceof Uint8Array ? raw : new Uint8Array(raw as ArrayLike<number>);
+        const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+        const slideHtml = await pptxToHtml(buffer, { scaleToFit: false, letterbox: true });
+        if (!Array.isArray(slideHtml) || slideHtml.length === 0) {
+          throw new Error("Keine Folien gefunden. Bitte pruefe die PPTX-Datei oder exportiere sie erneut aus PowerPoint.");
+        }
         const groupId = crypto.randomUUID();
 
-        const slides: MediaItem[] = pptxFile.slides.map((slide: any) => ({
+        const fileName =
+          filePath.split("\\").pop() ??
+          filePath.split("/").pop() ??
+          "Presentation";
+
+        const slides: MediaItem[] = slideHtml.map((html: string, index: number) => ({
           id: crypto.randomUUID(),
-          name: slide.name,
+          name: `Folie ${index + 1}`,
           path: filePath,
-          src: convertFileSrc(slide.image_path),
+          src: "",
+          html,
           type: "image",
           groupId,
-          notes: slide.notes,
         }));
 
         set((s) => ({
-          pptxGroups: [...s.pptxGroups, { id: groupId, name: pptxFile.name, slides }],
+          pptxGroups: [...s.pptxGroups, { id: groupId, name: fileName, slides }],
         }));
       }
     } catch (err) {
@@ -731,6 +850,11 @@ export const useStore = create<Store>((set, get) => ({
     const group = get().pptxGroups.find((g) => g.id === groupId);
     if (!group || !group.slides[slideIndex]) return;
     const slide = group.slides[slideIndex];
+    if (slide.html) {
+      set({ activeSlideId: slide.id, outputMode: "html", isBlackout: false });
+      sendToOutput({ mode: "html", html: { content: slide.html } });
+      return;
+    }
     set({ activeSlideId: slide.id, outputMode: "image", isBlackout: false });
     sendToOutput({ mode: "image", image: { src: slide.src } });
   },
@@ -817,35 +941,20 @@ export const useStore = create<Store>((set, get) => ({
       countdownInterval = null;
     }
     set({ countdownRunning: false, countdownRemaining: diffSeconds });
+    stopCountdownBackgroundMusic();
+    updateCountdownBgVolume(diffSeconds);
 
-    if (get().countdownLive) {
-      sendToOutput({
-        mode: "countdown",
-        countdown: {
-          remaining: diffSeconds,
-          label: get().countdownLabel,
-          running: false,
-          theme: get().countdownTheme,
-          targetTime: t,
-        },
-      });
-    }
+    sendCurrentCountdownToOutput({
+      remaining: diffSeconds,
+      running: false,
+      targetTime: t,
+    });
+    get().startCountdown();
   },
 
   setCountdownTheme: (theme) => {
     set({ countdownTheme: theme });
-    if (get().countdownLive) {
-      sendToOutput({
-        mode: "countdown",
-        countdown: {
-          remaining: get().countdownRemaining,
-          label: get().countdownLabel,
-          running: get().countdownRunning,
-          theme,
-          targetTime: get().countdownTargetTime,
-        },
-      });
-    }
+    sendCurrentCountdownToOutput({ theme });
   },
 
   setCountdownBackgroundMusic: (id) => {
@@ -864,9 +973,9 @@ export const useStore = create<Store>((set, get) => ({
       countdownTargetTime, 
       countdownBackgroundPlaylistId, 
       playlists, 
-      countdownBackgroundMusicStartMinutes,
-      countdownDisplayAfterZeroSeconds,
     } = get();
+
+    clearCountdownFadeOutTimeout();
 
     // Start background playlist if configured
     if (countdownBackgroundPlaylistId && countdownTargetTime) {
@@ -880,27 +989,13 @@ export const useStore = create<Store>((set, get) => ({
           ensureCountdownBgHandlers();
           countdownBgPlaylistId = playlist.id;
           countdownBgQueue = playable;
-          
-          // Calculate remaining seconds
-          const diffSeconds = secondsUntilTargetTime(countdownTargetTime);
-          
-          // Calculate optimal starting position so last track ends at 00
-          const optimalStart = calculateOptimalPlaylistStart(diffSeconds, playable, 0);
-          countdownBgIndex = optimalStart.startIndex;
-          
-          // Store skip seconds for the first track
-          (useStore as any).setState({ _countdownSkipSeconds: optimalStart.skipSeconds });
-          
-          // Start with the first track at calculated position
-          const firstTrack = playable[countdownBgIndex];
-          if (firstTrack?.src) {
-            a.src = firstTrack.src;
-            a.currentTime = optimalStart.skipSeconds;
-            a.volume = 0; // Start silent, volume will be updated by interval
-            
-            // Try to play
-            a.play().catch(() => {});
-          }
+          countdownBgIndex = 0;
+          countdownBgStarted = false;
+          countdownBgStarting = false;
+          countdownBgStartOffsetSeconds = 0;
+
+          a.volume = 0;
+          maybeStartCountdownBackgroundMusic(secondsUntilTargetTime(countdownTargetTime));
         }
       }
     }
@@ -917,21 +1012,18 @@ export const useStore = create<Store>((set, get) => ({
 
     set({ countdownRunning: true });
     
-    // Store the expected end time for fade-out logic
     countdownEndTime = Date.now() + (get().countdownRemaining * 1000);
+    sendCurrentCountdownToOutput({ running: true });
     
     countdownInterval = setInterval(() => {
-      const { countdownRemaining, countdownLabel, countdownLive, stopCountdown, countdownTheme, countdownTargetTime } = get();
-      const next = countdownRemaining - 1;
-      set({ countdownRemaining: Math.max(next, 0) });
-      updateCountdownBgVolume(Math.max(next, 0));
+      const { stopCountdown } = get();
+      const next = Math.max(0, Math.ceil(((countdownEndTime ?? Date.now()) - Date.now()) / 1000));
+
+      set({ countdownRemaining: next });
+      maybeStartCountdownBackgroundMusic(next);
+      updateCountdownBgVolume(next);
       
-      if (countdownLive) {
-        sendToOutput({
-          mode: "countdown",
-          countdown: { remaining: Math.max(next, 0), label: countdownLabel, running: true, theme: countdownTheme, targetTime: countdownTargetTime },
-        });
-      }
+      sendCurrentCountdownToOutput({ remaining: next, running: true });
       
       if (next <= 0) {
         stopCountdown();
@@ -947,61 +1039,55 @@ export const useStore = create<Store>((set, get) => ({
     
     const { countdownRemaining, countdownLabel, countdownTheme, countdownTargetTime, countdownDisplayAfterZeroSeconds } = get();
     
-    // Stop the music when countdown reaches 0
-    const a = ensureBackgroundMusicAudio();
-    if (a && countdownRemaining <= 0) {
-      try {
-        a.pause();
-        a.src = "";
-      } catch {
-        // ignore
-      }
+    set({ countdownRunning: false });
+
+    // Manual stop before 0 should also stop the countdown background music.
+    if (countdownRemaining > 0) {
+      stopCountdownBackgroundMusic();
     }
     
-    set({ countdownRunning: false });
-    
-    // If countdown reached 0, keep display visible for configured seconds, then fade to black
-    if (countdownRemaining <= 0 && get().countdownLive) {
-      // Send final countdown state (at 0)
-      sendToOutput({
-        mode: "countdown",
-        countdown: { 
-          remaining: 0, 
-          label: countdownLabel, 
-          running: false, 
-          theme: countdownTheme, 
-          targetTime: countdownTargetTime,
-          isFadingOut: true,
-        },
+    // If countdown reached 0, keep display visible for configured seconds, then fade to black.
+    // This only affects output when countdown is currently the active output mode.
+    if (countdownRemaining <= 0 && isCountdownOutputActive()) {
+      sendCurrentCountdownToOutput({
+        remaining: 0,
+        label: countdownLabel,
+        running: false,
+        theme: countdownTheme,
+        targetTime: countdownTargetTime,
       });
       
       // After displayAfterZeroSeconds, fade out to black
-      if (countdownFadeOutTimeout) {
-        clearTimeout(countdownFadeOutTimeout);
-      }
-      
+      clearCountdownFadeOutTimeout();
+
       countdownFadeOutTimeout = setTimeout(() => {
-        sendToOutput({ mode: "blank" });
-        set({ outputMode: "blank", isBlackout: false });
-        countdownFadeOutTimeout = null;
+        sendCurrentCountdownToOutput({
+          remaining: 0,
+          label: countdownLabel,
+          running: false,
+          theme: countdownTheme,
+          targetTime: countdownTargetTime,
+          isFadingOut: true,
+        });
+
+        countdownFadeOutTimeout = setTimeout(() => {
+          sendToOutput({ mode: "blackout" });
+          set({ outputMode: "blackout", isBlackout: false });
+          countdownFadeOutTimeout = null;
+        }, 1200);
       }, countdownDisplayAfterZeroSeconds * 1000);
       
       return;
     }
     
     // Countdown was stopped manually (not at 0)
-    if (get().countdownLive) {
-      sendToOutput({
-        mode: "countdown",
-        countdown: { 
-          remaining: countdownRemaining, 
-          label: countdownLabel, 
-          running: false, 
-          theme: countdownTheme, 
-          targetTime: countdownTargetTime,
-        },
-      });
-    }
+    sendCurrentCountdownToOutput({
+      remaining: countdownRemaining,
+      label: countdownLabel,
+      running: false,
+      theme: countdownTheme,
+      targetTime: countdownTargetTime,
+    });
   },
 
   resetCountdown: () => {
@@ -1013,11 +1099,7 @@ export const useStore = create<Store>((set, get) => ({
     // Stop background music
     stopCountdownBackgroundMusic();
     
-    // Clear fade-out timeout
-    if (countdownFadeOutTimeout) {
-      clearTimeout(countdownFadeOutTimeout);
-      countdownFadeOutTimeout = null;
-    }
+    clearCountdownFadeOutTimeout();
     
     const t = get().countdownTargetTime;
     let diffSeconds = 0;
@@ -1025,36 +1107,19 @@ export const useStore = create<Store>((set, get) => ({
       diffSeconds = secondsUntilTargetTime(t);
     }
     set({ countdownRunning: false, countdownRemaining: diffSeconds });
-    if (get().countdownLive) {
-      sendToOutput({
-        mode: "countdown",
-        countdown: { 
-          remaining: diffSeconds, 
-          label: get().countdownLabel, 
-          running: false, 
-          theme: get().countdownTheme, 
-          targetTime: t,
-        },
-      });
-    }
+    sendCurrentCountdownToOutput({ remaining: diffSeconds, running: false, targetTime: t });
   },
 
   setCountdownLive: (live) => {
-    set({ countdownLive: live, outputMode: live ? "countdown" : get().outputMode, isBlackout: false });
-    if (live) {
-      sendToOutput({
-        mode: "countdown",
-        countdown: {
-          remaining: get().countdownRemaining,
-          label: get().countdownLabel,
-          running: get().countdownRunning,
-          theme: get().countdownTheme,
-          targetTime: get().countdownTargetTime,
-        },
-      });
-    } else {
-      sendToOutput({ mode: "blank" });
+    if (!live) {
+      clearCountdownFadeOutTimeout();
+      set({ countdownLive: false });
+      updateCountdownBgVolume(get().countdownRemaining);
+      return;
     }
+    set({ countdownLive: true, outputMode: "countdown", isBlackout: false });
+    sendCurrentCountdownToOutput({}, true);
+    updateCountdownBgVolume(get().countdownRemaining);
   },
 
   // ── Video ──────────────────────────────────────────────────────────────
@@ -2068,6 +2133,27 @@ useStore.subscribe((state, prevState) => {
     state.countdownDisplayAfterZeroSeconds !== prevState.countdownDisplayAfterZeroSeconds;
 
   if (changed) state.saveSettings();
+});
+
+// Keep countdown output/audio in sync with global output selection.
+useStore.subscribe((state, prevState) => {
+  if (!prevState) return;
+
+  const outputSelectionChanged =
+    state.outputMode !== prevState.outputMode || state.isBlackout !== prevState.isBlackout;
+
+  if (!outputSelectionChanged) return;
+
+  updateCountdownBgVolume(state.countdownRemaining);
+
+  const becameActive = state.outputMode === "countdown" && !state.isBlackout;
+  const wasActive = prevState.outputMode === "countdown" && !prevState.isBlackout;
+  if (wasActive && !becameActive) {
+    clearCountdownFadeOutTimeout();
+  }
+  if (becameActive && !wasActive) {
+    sendCurrentCountdownToOutput({}, true);
+  }
 });
 
 // Load settings on init
