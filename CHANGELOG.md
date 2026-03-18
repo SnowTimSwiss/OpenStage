@@ -2,7 +2,7 @@
 
 Alle wesentlichen Änderungen an OpenStage werden in dieser Datei dokumentiert.
 
-## [1.1.0] - 2026-03-18
+## [1.0.0] - 2026-03-18
 
 ### Hinzugefügt
 - **Show Mode (Show Tab)** – Neuer Live-Control-View für Events
@@ -35,7 +35,7 @@ Alle wesentlichen Änderungen an OpenStage werden in dieser Datei dokumentiert.
 - **Release Naming Scheme** normalisiert
   - Einheitliches Format: `openstage-v{version}-{platform}-{variant}.{ext}`
   - Klare Unterscheidung nach Plattform und Installationsart
-  - Beispiel: `openstage-v1.1.0-windows-x64-setup.exe`
+  - Beispiel: `openstage-v1.0.0-windows-x64-setup.exe`
 
 ### Entfernt
 - **PPTXjs Abhängigkeit** - Wechsel zu PDF-basiertem Import

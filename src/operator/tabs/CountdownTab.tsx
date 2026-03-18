@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useStore } from "../../store/useStore";
 import { formatTime } from "../../lib/formatTime";
 
@@ -34,9 +35,18 @@ export default function CountdownTab() {
   const setFadeInStartMin = useStore((s) => s.setCountdownBackgroundMusicFadeInStartMinutes);
   const setFullMin = useStore((s) => s.setCountdownBackgroundMusicFullVolumeMinutes);
   const setDisplayAfterZero = useStore((s) => s.setCountdownDisplayAfterZeroSeconds);
+  const [musicExpanded, setMusicExpanded] = useState(Boolean(backgroundPlaylistId));
+
+  useEffect(() => {
+    setMusicExpanded(Boolean(backgroundPlaylistId));
+  }, [backgroundPlaylistId]);
 
   const urgent = remaining <= 10 && remaining > 0 && running;
   const countdownOnOutput = outputMode === "countdown" && !isBlackout;
+  const activePlaylistId = useStore((s) => s.activePlaylistId);
+  const activePlaylist = activePlaylistId ? playlists.find((p) => p.id === activePlaylistId) : null;
+  const backgroundPlaylist = backgroundPlaylistId ? playlists.find((p) => p.id === backgroundPlaylistId) : null;
+  const backgroundPlaylistArt = backgroundPlaylist?.coverArt ?? backgroundPlaylist?.tracks[0]?.albumArt ?? null;
   const playlistOptions = playlists.map((p) => ({
     id: p.id,
     title: `${p.source === "spotify" ? "Spotify" : "Local"}: ${p.name} (${p.tracks.length})`,
@@ -146,111 +156,256 @@ export default function CountdownTab() {
         </div>
 
         <div>
-          <label className="text-xs font-medium block mb-2" style={{ color: "#666" }}>
-            🎵 Hintergrundmusik (endet bei 0:00)
-          </label>
-          <select
-            className="w-full text-sm px-3 py-2 rounded outline-none"
-            style={{ background: "#141414", border: "1px solid #252525", color: "#ddd" }}
-            value={backgroundPlaylistId ?? ""}
-            onChange={(e) => setBackgroundPlaylist(e.target.value || null)}
+          <button
+            onClick={() => setMusicExpanded((value) => !value)}
+            className="w-full flex items-center justify-between gap-3 rounded-xl px-4 py-3 transition-all"
+            style={{ background: "#0d0d0d", border: "1px solid #1e1e1e" }}
           >
-            <option value="">Keine Musik</option>
-            {playlistOptions.map((song) => (
-              <option key={song.id} value={song.id}>
-                {song.title} {song.artist ? `— ${song.artist}` : ""}
-              </option>
-            ))}
-          </select>
-
-          <div className="grid grid-cols-2 gap-2 mt-3">
-            <div>
-              <label className="text-[11px] block mb-1" style={{ color: "#666" }}>
-                Musik startet (min vor 00)
-              </label>
-              <input
-                type="number"
-                min={0}
-                max={240}
-                value={musicStartMin}
-                onChange={(e) => setMusicStartMin(Number(e.target.value))}
-                className="w-full text-sm px-2 py-2 rounded outline-none"
-                style={{ background: "#141414", border: "1px solid #252525", color: "#ddd" }}
-              />
-            </div>
-
-            <div>
-              <label className="text-[11px] block mb-1" style={{ color: "#666" }}>
-                Start-Lautstärke (%)
-              </label>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                value={startVolumePercent}
-                onChange={(e) => setStartVolumePercent(Number(e.target.value))}
-                className="w-full text-sm px-2 py-2 rounded outline-none"
-                style={{ background: "#141414", border: "1px solid #252525", color: "#ddd" }}
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2 mt-2">
-            <div>
-              <label className="text-[11px] block mb-1" style={{ color: "#666" }}>
-                Fade-In ab (min vor 00)
-              </label>
-              <input
-                type="number"
-                min={0}
-                max={240}
-                value={fadeInStartMin}
-                onChange={(e) => setFadeInStartMin(Number(e.target.value))}
-                className="w-full text-sm px-2 py-2 rounded outline-none"
-                style={{ background: "#141414", border: "1px solid #252525", color: "#ddd" }}
-              />
-            </div>
-
-            <div>
-              <label className="text-[11px] block mb-1" style={{ color: "#666" }}>
-                100% ab (min vor 00)
-              </label>
-              <input
-                type="number"
-                min={0}
-                max={240}
-                value={fullMin}
-                onChange={(e) => setFullMin(Number(e.target.value))}
-                className="w-full text-sm px-2 py-2 rounded outline-none"
-                style={{ background: "#141414", border: "1px solid #252525", color: "#ddd" }}
-              />
-            </div>
-          </div>
-
-          <div className="mt-3">
-            <label className="text-[11px] block mb-1" style={{ color: "#666" }}>
-              Max. Lautstärke (%)
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                value={bgVolume}
-                onChange={(e) => setBgVolume(Number(e.target.value))}
-                className="flex-1"
-              />
-              <div className="text-[11px] w-10 text-right" style={{ color: "#555" }}>
-                {Math.round(bgVolume * 100)}%
+            <div className="text-left">
+              <div className="text-xs font-medium" style={{ color: "#ddd" }}>
+                Hintergrundmusik
+              </div>
+              <div className="text-[11px] mt-1" style={{ color: "#666" }}>
+                {musicExpanded ? "Einstellungen sichtbar" : "Eingeklappt"}
               </div>
             </div>
-          </div>
+            <div
+              className={`relative h-6 w-11 rounded-full transition-colors ${musicExpanded ? "bg-[#f97316]" : "bg-[#333]"}`}
+              aria-hidden="true"
+            >
+              <div
+                className="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform"
+                style={{ transform: musicExpanded ? "translateX(22px)" : "translateX(2px)" }}
+              />
+            </div>
+          </button>
 
-          <p className="text-[11px] mt-2" style={{ color: "#555" }}>
-            Musik startet {musicStartMin} min vor 00 mit {startVolumePercent}% der max. Lautstärke. Ab {fadeInStartMin} min wird auf{" "}
-            {Math.round(bgVolume * 100)}% eingeblendet. Bei {fullMin} min ist Maximum erreicht.
-          </p>
+          {musicExpanded && (
+            <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1.3fr)_minmax(280px,0.9fr)]">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <label className="text-xs font-medium" style={{ color: "#666" }}>
+                    🎵 Hintergrundmusik (endet bei 0:00)
+                  </label>
+                  <button
+                    onClick={() => {
+                      if (!activePlaylistId) return;
+                      setBackgroundPlaylist(activePlaylistId);
+                    }}
+                    disabled={!activePlaylistId}
+                    className="text-[11px] px-2 py-1 rounded"
+                    style={{
+                      background: "#1a1a1a",
+                      color: activePlaylistId ? "#f97316" : "#555",
+                      border: "1px solid #2a2a2a",
+                    }}
+                    title={
+                      activePlaylist
+                        ? `Aktive Playlist übernehmen: ${activePlaylist.name}`
+                        : "Im Musik-Tab erst eine Playlist aktivieren"
+                    }
+                  >
+                    Aktive Playlist
+                  </button>
+                </div>
+                {activePlaylist && (
+                  <p className="text-[11px] mb-2" style={{ color: "#555" }}>
+                    Aktiv im Musik-Tab: <span style={{ color: "#888" }}>{activePlaylist.name}</span>
+                  </p>
+                )}
+                <select
+                  className="w-full text-sm px-3 py-2 rounded outline-none"
+                  style={{ background: "#141414", border: "1px solid #252525", color: "#ddd" }}
+                  value={backgroundPlaylistId ?? ""}
+                  onChange={(e) => setBackgroundPlaylist(e.target.value || null)}
+                >
+                  <option value="">Keine Musik</option>
+                  {playlistOptions.map((song) => (
+                    <option key={song.id} value={song.id}>
+                      {song.title} {song.artist ? `— ${song.artist}` : ""}
+                    </option>
+                  ))}
+                </select>
+
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  <div>
+                    <label className="text-[11px] block mb-1" style={{ color: "#666" }}>
+                      Musik startet (min vor 00)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={240}
+                      value={musicStartMin}
+                      onChange={(e) => setMusicStartMin(Number(e.target.value))}
+                      className="w-full text-sm px-2 py-2 rounded outline-none"
+                      style={{ background: "#141414", border: "1px solid #252525", color: "#ddd" }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] block mb-1" style={{ color: "#666" }}>
+                      Start-Lautstärke (%)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={startVolumePercent}
+                      onChange={(e) => setStartVolumePercent(Number(e.target.value))}
+                      className="w-full text-sm px-2 py-2 rounded outline-none"
+                      style={{ background: "#141414", border: "1px solid #252525", color: "#ddd" }}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <div>
+                    <label className="text-[11px] block mb-1" style={{ color: "#666" }}>
+                      Fade-In ab (min vor 00)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={240}
+                      value={fadeInStartMin}
+                      onChange={(e) => setFadeInStartMin(Number(e.target.value))}
+                      className="w-full text-sm px-2 py-2 rounded outline-none"
+                      style={{ background: "#141414", border: "1px solid #252525", color: "#ddd" }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] block mb-1" style={{ color: "#666" }}>
+                      100% ab (min vor 00)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={240}
+                      value={fullMin}
+                      onChange={(e) => setFullMin(Number(e.target.value))}
+                      className="w-full text-sm px-2 py-2 rounded outline-none"
+                      style={{ background: "#141414", border: "1px solid #252525", color: "#ddd" }}
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-3">
+                  <label className="text-[11px] block mb-1" style={{ color: "#666" }}>
+                    Max. Lautstärke (%)
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={bgVolume}
+                      onChange={(e) => setBgVolume(Number(e.target.value))}
+                      className="flex-1"
+                    />
+                    <div className="text-[11px] w-10 text-right" style={{ color: "#555" }}>
+                      {Math.round(bgVolume * 100)}%
+                    </div>
+                  </div>
+                </div>
+
+                <p className="text-[11px] mt-2" style={{ color: "#555" }}>
+                  Musik startet {musicStartMin} min vor 00 mit {startVolumePercent}% der max. Lautstärke. Ab{" "}
+                  {fadeInStartMin} min wird auf {Math.round(bgVolume * 100)}% eingeblendet. Bei {fullMin} min ist
+                  Maximum erreicht.
+                </p>
+              </div>
+
+              <div
+                className="rounded-xl p-4 border"
+                style={{
+                  background: "#0b0b0b",
+                  borderColor: "#232323",
+                  opacity: 0.55,
+                  filter: "grayscale(1)",
+                }}
+              >
+                <div className="text-[10px] uppercase tracking-widest font-medium" style={{ color: "#666" }}>
+                  Player Widget
+                </div>
+
+                <div className="mt-4 flex items-center gap-3">
+                  <div
+                    className="w-12 h-12 rounded-lg flex items-center justify-center shrink-0 overflow-hidden"
+                    style={{ background: "#1a1a1a" }}
+                  >
+                    {backgroundPlaylistArt ? (
+                      <img src={backgroundPlaylistArt} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-lg">🎵</span>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium truncate" style={{ color: "#ddd" }}>
+                      {backgroundPlaylist ? backgroundPlaylist.name : "Keine Hintergrundmusik"}
+                    </div>
+                    <div className="text-[11px] mt-0.5" style={{ color: "#666" }}>
+                      {backgroundPlaylist
+                        ? `${backgroundPlaylist.tracks.length} Tracks · ${
+                            backgroundPlaylist.source === "spotify" ? "Spotify" : "Lokal"
+                          }`
+                        : "Nur Vorschau, hier kann nichts geändert werden"}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex items-center justify-center gap-2">
+                  <button
+                    disabled
+                    className="w-9 h-9 rounded-full flex items-center justify-center text-sm cursor-not-allowed"
+                    style={{ background: "#1a1a1a", color: "#666", border: "1px solid #222" }}
+                  >
+                    ⏮
+                  </button>
+                  <button
+                    disabled
+                    className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold cursor-not-allowed"
+                    style={{ background: "#1f1f1f", color: "#777", border: "1px solid #262626" }}
+                  >
+                    ▶
+                  </button>
+                  <button
+                    disabled
+                    className="w-9 h-9 rounded-full flex items-center justify-center text-sm cursor-not-allowed"
+                    style={{ background: "#1a1a1a", color: "#666", border: "1px solid #222" }}
+                  >
+                    ⏭
+                  </button>
+                </div>
+
+                <div className="mt-4">
+                  <div className="flex items-center justify-between text-[11px] mb-1" style={{ color: "#666" }}>
+                    <span>Lautstärke</span>
+                    <span>{Math.round(bgVolume * 100)}%</span>
+                  </div>
+                  <input type="range" min={0} max={1} step={0.01} value={bgVolume} disabled className="w-full" />
+                </div>
+
+                <div className="mt-4">
+                  <div className="h-1.5 rounded-full bg-[#1a1a1a] overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-[#666]"
+                      style={{ width: backgroundPlaylist ? "42%" : "0%" }}
+                    />
+                  </div>
+                  <p className="text-[11px] mt-2" style={{ color: "#555" }}>
+                    Gleiche Vorschau wie im Musik-Player, aber im Countdown gesperrt.
+                  </p>
+                </div>
+
+                <p className="text-[11px] mt-3" style={{ color: "#555" }}>
+                  Steuerung bleibt im Countdown gesperrt. Hier siehst du nur, welche Playlist aktiv ist.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
         <div>
@@ -298,12 +453,6 @@ export default function CountdownTab() {
               </button>
             ))}
           </div>
-        </div>
-
-        <div className="mt-auto">
-          <p className="text-[11px] text-center mt-2" style={{ color: "#555" }}>
-            Countdown läuft im Hintergrund. Sichtbar wird er, wenn der aktive Ausgabe-Modus auf Countdown steht.
-          </p>
         </div>
       </div>
     </div>

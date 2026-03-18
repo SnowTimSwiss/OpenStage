@@ -23,12 +23,7 @@ export default function ShowTab() {
   const reorderShowQueue = useStore((s) => s.reorderShowQueue);
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-  const [dropIndex, setDropIndex] = useState<number | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement>(null);
-  const queueListRef = useRef<HTMLDivElement>(null);
-  const draggedIndexRef = useRef<number | null>(null);
-  const lastHoverIndexRef = useRef<number | null>(null);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -82,8 +77,7 @@ export default function ShowTab() {
     countdownTheme,
   ]);
 
-  const currentItem =
-    showCurrentIndex >= 0 && showCurrentIndex < showQueue.length ? showQueue[showCurrentIndex] : null;
+  const currentItem = showCurrentIndex >= 0 && showCurrentIndex < showQueue.length ? showQueue[showCurrentIndex] : null;
 
   const previewPayload = useMemo(
     () =>
@@ -118,40 +112,6 @@ export default function ShowTab() {
     setShowCurrentIndex(index);
   }
 
-  function moveDraggedItem(sourceIndex: number | null, targetIndex: number) {
-    if (sourceIndex === null || sourceIndex === targetIndex) {
-      setDraggedIndex(null);
-      setDropIndex(null);
-      draggedIndexRef.current = null;
-      lastHoverIndexRef.current = null;
-      return;
-    }
-    if (sourceIndex < 0 || sourceIndex >= showQueue.length) {
-      setDraggedIndex(null);
-      setDropIndex(null);
-      draggedIndexRef.current = null;
-      lastHoverIndexRef.current = null;
-      return;
-    }
-
-    const adjustedTargetIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
-    const boundedTargetIndex = Math.max(0, Math.min(showQueue.length - 1, adjustedTargetIndex));
-    reorderShowQueue(sourceIndex, boundedTargetIndex);
-
-    if (showCurrentIndex === sourceIndex) {
-      setShowCurrentIndex(boundedTargetIndex);
-    } else if (sourceIndex < showCurrentIndex && boundedTargetIndex >= showCurrentIndex) {
-      setShowCurrentIndex(showCurrentIndex - 1);
-    } else if (sourceIndex > showCurrentIndex && boundedTargetIndex <= showCurrentIndex) {
-      setShowCurrentIndex(showCurrentIndex + 1);
-    }
-
-    setDraggedIndex(null);
-    setDropIndex(null);
-    draggedIndexRef.current = null;
-    lastHoverIndexRef.current = null;
-  }
-
   function moveItemToFinalIndex(sourceIndex: number, targetIndex: number) {
     if (
       sourceIndex < 0 ||
@@ -172,76 +132,6 @@ export default function ShowTab() {
     } else if (sourceIndex > showCurrentIndex && targetIndex <= showCurrentIndex) {
       setShowCurrentIndex(showCurrentIndex + 1);
     }
-  }
-
-  function handleDragStart(e: React.DragEvent, index: number) {
-    setDraggedIndex(index);
-    setDropIndex(index);
-    draggedIndexRef.current = index;
-    lastHoverIndexRef.current = index;
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", String(index));
-  }
-
-  function handleDragEnd() {
-    const source = draggedIndexRef.current;
-    const target = dropIndex ?? lastHoverIndexRef.current;
-    if (
-      source !== null &&
-      target !== null &&
-      target !== source
-    ) {
-      moveDraggedItem(source, target);
-      return;
-    }
-    setDraggedIndex(null);
-    setDropIndex(null);
-    draggedIndexRef.current = null;
-    lastHoverIndexRef.current = null;
-  }
-
-  function getDropTargetIndex(e: React.DragEvent, index: number) {
-    const target = e.currentTarget as HTMLElement;
-    const rect = target.getBoundingClientRect();
-    const offsetY = e.clientY - rect.top;
-    return offsetY > rect.height / 2 ? index + 1 : index;
-  }
-
-  function getDropIndexFromClientY(clientY: number) {
-    const root = queueListRef.current;
-    if (!root) return showQueue.length;
-
-    const items = Array.from(root.querySelectorAll<HTMLElement>("[data-queue-item='true']"));
-    for (const item of items) {
-      const idx = Number(item.dataset.index);
-      if (!Number.isInteger(idx)) continue;
-      const rect = item.getBoundingClientRect();
-      if (clientY < rect.top + rect.height / 2) return idx;
-    }
-
-    return showQueue.length;
-  }
-
-  function handleQueueDragOver(e: React.DragEvent) {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    const target = getDropIndexFromClientY(e.clientY);
-    lastHoverIndexRef.current = target;
-    if (dropIndex !== target) setDropIndex(target);
-  }
-
-  function handleQueueDrop(e: React.DragEvent) {
-    e.preventDefault();
-    moveDraggedItem(getDraggedIndex(e), getDropIndexFromClientY(e.clientY));
-  }
-
-  function getDraggedIndex(e: React.DragEvent) {
-    const raw = e.dataTransfer.getData("text/plain");
-    const parsed = Number(raw);
-    if (Number.isInteger(parsed) && parsed >= 0) {
-      return parsed;
-    }
-    return draggedIndexRef.current;
   }
 
   function getTotalSlides(item: ShowItem) {
@@ -282,12 +172,7 @@ export default function ShowTab() {
             </span>
           </div>
 
-          <div
-            ref={queueListRef}
-            className="flex-1 overflow-y-auto p-2 flex flex-col gap-1"
-            onDragOver={handleQueueDragOver}
-            onDrop={handleQueueDrop}
-          >
+          <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1">
             {showQueue.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-center px-4">
                 <span className="text-3xl mb-2">📋</span>
@@ -302,45 +187,23 @@ export default function ShowTab() {
               <>
                 {showQueue.map((item, index) => {
                   const isActive = index === showCurrentIndex;
-                  const isDragging = draggedIndex === index;
                   const totalSlides = getTotalSlides(item);
                   const currentSlide = (item.slideIndex ?? 0) + 1;
-                  const showDropBefore = draggedIndex !== null && dropIndex === index && draggedIndex !== index;
 
                   return (
-                    <div key={item.id} className="flex flex-col" data-queue-item="true" data-index={index}>
+                    <div key={item.id}>
                       <div
-                        onDragEnter={() => {
-                          if (dropIndex !== index) setDropIndex(index);
-                          lastHoverIndexRef.current = index;
-                        }}
-                        onDragOver={(e) => {
-                          e.preventDefault();
-                          e.dataTransfer.dropEffect = "move";
-                          if (dropIndex !== index) setDropIndex(index);
-                          lastHoverIndexRef.current = index;
-                        }}
-                        className={`h-3 rounded transition-all ${showDropBefore ? "bg-[#f97316]" : "bg-transparent"}`}
-                      />
-                      <div
-                        draggable
-                        onDragStart={(e) => handleDragStart(e, index)}
-                        onDragEnter={(e) => {
-                          const target = getDropTargetIndex(e, index);
-                          if (dropIndex !== target) setDropIndex(target);
-                          lastHoverIndexRef.current = target;
-                        }}
-                        onDragEnd={handleDragEnd}
                         onClick={() => handleItemClick(index)}
                         className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all border ${
                           isActive
                             ? "bg-[#f9731620] border-[#f9731640]"
-                            : isDragging
-                              ? "bg-[#222] border-[#444] opacity-50"
-                              : "bg-[#141414] border-[#1e1e1e] hover:border-[#333]"
+                            : "bg-[#141414] border-[#1e1e1e] hover:border-[#333]"
                         }`}
                       >
-                        <span className="text-[10px] cursor-grab active:cursor-grabbing select-none" style={{ color: "#444" }}>
+                        <span
+                          className="text-[10px] cursor-grab active:cursor-grabbing select-none"
+                          style={{ color: "#444" }}
+                        >
                           ⋮⋮
                         </span>
                         <span className="text-lg">{getItemIcon(item.type)}</span>
@@ -362,7 +225,10 @@ export default function ShowTab() {
                         </div>
 
                         {isActive && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: "#f97316", color: "white" }}>
+                          <span
+                            className="text-[10px] px-1.5 py-0.5 rounded"
+                            style={{ background: "#f97316", color: "white" }}
+                          >
                             LIVE
                           </span>
                         )}
@@ -407,22 +273,6 @@ export default function ShowTab() {
                     </div>
                   );
                 })}
-
-                <div
-                  onDragEnter={() => {
-                    if (dropIndex !== showQueue.length) setDropIndex(showQueue.length);
-                    lastHoverIndexRef.current = showQueue.length;
-                  }}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = "move";
-                    if (dropIndex !== showQueue.length) setDropIndex(showQueue.length);
-                    lastHoverIndexRef.current = showQueue.length;
-                  }}
-                  className={`h-3 rounded transition-all ${
-                    draggedIndex !== null && dropIndex === showQueue.length ? "bg-[#f97316]" : "bg-transparent"
-                  }`}
-                />
               </>
             )}
           </div>
@@ -491,7 +341,10 @@ export default function ShowTab() {
                     <p className="text-[10px]" style={{ color: "#555" }}>
                       Type: {currentItem.type}
                       {(currentItem.type === "song" || currentItem.type === "pdf") && (
-                        <span> • Slide: {(currentItem.slideIndex ?? 0) + 1}/{getTotalSlides(currentItem)}</span>
+                        <span>
+                          {" "}
+                          • Slide: {(currentItem.slideIndex ?? 0) + 1}/{getTotalSlides(currentItem)}
+                        </span>
                       )}
                     </p>
                   </div>
