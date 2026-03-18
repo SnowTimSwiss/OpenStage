@@ -1603,34 +1603,36 @@ export const useStore = create<Store>((set, get) => ({
         updatedAt: Date.now(),
       };
 
-      // Fetch tracks
-      const tracksResponse = await fetch(data.tracks.href, {
-        headers: {
-          Authorization: `Bearer ${spotifyAuth.accessToken}`,
-        },
-      });
+      // Fetch tracks (handle case where data.tracks might be undefined)
+      if (data.tracks?.href) {
+        const tracksResponse = await fetch(data.tracks.href, {
+          headers: {
+            Authorization: `Bearer ${spotifyAuth.accessToken}`,
+          },
+        });
 
-      if (tracksResponse.ok) {
-        const tracksData = await tracksResponse.json();
-        newPlaylist.tracks = tracksData.items
-          .filter((item: any) => item.track && item.track.id)
-          .map((item: any) => {
-            const track = item.track;
-            return {
-              id: crypto.randomUUID(),
-              name: `${track.name} - ${track.artists?.[0]?.name || "Unknown"}`,
-              path: "",
-              src: track.preview_url || "",
-              source: "spotify" as MusicSource,
-              artist: track.artists?.[0]?.name,
-              album: track.album?.name,
-              albumArt: track.album?.images?.[0]?.url,
-              duration: track.duration_ms / 1000,
-              spotifyId: track.id,
-              spotifyUri: track.uri,
-              playlistId: newPlaylist.id,
-            } as MusicItem;
-          });
+        if (tracksResponse.ok) {
+          const tracksData = await tracksResponse.json();
+          newPlaylist.tracks = tracksData.items
+            .filter((item: any) => item.track && item.track.id)
+            .map((item: any) => {
+              const track = item.track;
+              return {
+                id: crypto.randomUUID(),
+                name: `${track.name} - ${track.artists?.[0]?.name || "Unknown"}`,
+                path: "",
+                src: track.preview_url || "",
+                source: "spotify" as MusicSource,
+                artist: track.artists?.[0]?.name,
+                album: track.album?.name,
+                albumArt: track.album?.images?.[0]?.url,
+                duration: track.duration_ms / 1000,
+                spotifyId: track.id,
+                spotifyUri: track.uri,
+                playlistId: newPlaylist.id,
+              } as MusicItem;
+            });
+        }
       }
 
       set((s) => ({ playlists: [...s.playlists, newPlaylist] }));
