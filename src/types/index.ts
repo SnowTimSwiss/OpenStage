@@ -14,24 +14,24 @@ export interface Song {
   slides: SongSlide[];
 }
 
-export type MediaType = "image" | "video";
+export type MediaType = "image" | "video" | "pdf";
 
 export interface MediaItem {
   id: string;
   name: string;
   path: string;
   src: string; // convertFileSrc or base64 result
-  html?: string; // optional HTML slide content for PPTX imports
   type: MediaType;
-  groupId?: string; // For PPTX groups
+  groupId?: string; // For PDF groups
+  pageNumber?: number; // For PDF pages
   duration?: number; // For videos (seconds)
   notes?: string; // Private notes for operator
 }
 
-export interface PptxGroup {
+export interface PdfGroup {
   id: string;
   name: string;
-  slides: MediaItem[];
+  pages: MediaItem[];
 }
 
 export type MusicSource = "local" | "spotify";
@@ -122,12 +122,12 @@ export type TransitionType = "none" | "fade" | "slide" | "zoom";
 
 // ── Show Mode ────────────────────────────────────────────────────────────────
 
-export type ShowItemType = "image" | "video" | "song" | "countdown" | "pptx";
+export type ShowItemType = "image" | "video" | "song" | "countdown" | "pdf";
 
 export interface ShowItem {
   id: string;
   type: ShowItemType;
-  refId?: string; // reference to existing media/song/pptx group
+  refId?: string; // reference to existing media/song/pdf group
   label: string;
-  slideIndex?: number; // for songs/pptx: current slide number
+  slideIndex?: number; // for songs/pdf: current page number
 }

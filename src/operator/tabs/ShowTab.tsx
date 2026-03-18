@@ -8,7 +8,7 @@ export default function ShowTab() {
   const slides = useStore((s) => s.slides);
   const videos = useStore((s) => s.videos);
   const songs = useStore((s) => s.songs);
-  const pptxGroups = useStore((s) => s.pptxGroups);
+  const pdfGroups = useStore((s) => s.pdfGroups);
   const countdownRemaining = useStore((s) => s.countdownRemaining);
   const countdownLabel = useStore((s) => s.countdownLabel);
   const countdownTheme = useStore((s) => s.countdownTheme);
@@ -60,7 +60,7 @@ export default function ShowTab() {
       slides,
       videos,
       songs,
-      pptxGroups,
+      pdfGroups,
       countdownRemaining,
       countdownLabel,
       countdownTheme,
@@ -76,7 +76,7 @@ export default function ShowTab() {
     slides,
     videos,
     songs,
-    pptxGroups,
+    pdfGroups,
     countdownRemaining,
     countdownLabel,
     countdownTheme,
@@ -92,23 +92,23 @@ export default function ShowTab() {
             slides,
             videos,
             songs,
-            pptxGroups,
+            pdfGroups,
             countdownRemaining,
             countdownLabel,
             countdownTheme,
           })
         : { mode: "blank" as const },
-    [currentItem, slides, videos, songs, pptxGroups, countdownRemaining, countdownLabel, countdownTheme]
+    [currentItem, slides, videos, songs, pdfGroups, countdownRemaining, countdownLabel, countdownTheme]
   );
 
   function handleAddItem(type: ShowItem["type"], refId?: string) {
-    const label = getItemLabel(type, refId, slides, videos, songs, pptxGroups);
+    const label = getItemLabel(type, refId, slides, videos, songs, pdfGroups);
     const item: ShowItem = {
       id: crypto.randomUUID(),
       type,
       refId,
       label,
-      slideIndex: type === "song" || type === "pptx" ? 0 : undefined,
+      slideIndex: type === "song" || type === "pdf" ? 0 : undefined,
     };
     addToShowQueue(item);
     setIsAddModalOpen(false);
@@ -249,9 +249,9 @@ export default function ShowTab() {
       const song = songs.find((s) => s.id === item.refId);
       return song?.slides.length ?? 1;
     }
-    if (item.type === "pptx" && item.refId) {
-      const group = pptxGroups.find((g) => g.id === item.refId);
-      return group?.slides.length ?? 1;
+    if (item.type === "pdf" && item.refId) {
+      const group = pdfGroups.find((g) => g.id === item.refId);
+      return group?.pages.length ?? 1;
     }
     return 1;
   }
@@ -353,7 +353,7 @@ export default function ShowTab() {
                             <p className="text-[9px]" style={{ color: "#555" }}>
                               {item.type}
                             </p>
-                            {(item.type === "song" || item.type === "pptx") && (
+                            {(item.type === "song" || item.type === "pdf") && (
                               <span className="text-[9px] px-1 rounded" style={{ background: "#222", color: "#666" }}>
                                 {currentSlide}/{totalSlides}
                               </span>
@@ -458,7 +458,7 @@ export default function ShowTab() {
             {currentItem ? (
               <div className="w-full h-full max-h-[500px] aspect-video bg-[#0a0a0a] rounded-lg border border-[#1e1e1e] overflow-hidden relative">
                 <OutputRenderer state={previewPayload} embedded muteVideo videoRef={previewVideoRef} />
-                {(currentItem.type === "song" || currentItem.type === "pptx") && (
+                {(currentItem.type === "song" || currentItem.type === "pdf") && (
                   <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2">
                     <span className="text-[10px] px-2 py-1 rounded" style={{ background: "#222", color: "#888" }}>
                       Slide {(currentItem.slideIndex ?? 0) + 1} / {getTotalSlides(currentItem)}
@@ -490,7 +490,7 @@ export default function ShowTab() {
                     </p>
                     <p className="text-[10px]" style={{ color: "#555" }}>
                       Type: {currentItem.type}
-                      {(currentItem.type === "song" || currentItem.type === "pptx") && (
+                      {(currentItem.type === "song" || currentItem.type === "pdf") && (
                         <span> • Slide: {(currentItem.slideIndex ?? 0) + 1}/{getTotalSlides(currentItem)}</span>
                       )}
                     </p>
@@ -523,7 +523,7 @@ export default function ShowTab() {
           slides={slides}
           videos={videos}
           songs={songs}
-          pptxGroups={pptxGroups}
+          pdfGroups={pdfGroups}
           onAdd={handleAddItem}
           onClose={() => setIsAddModalOpen(false)}
         />
@@ -538,13 +538,13 @@ function buildOutputPayload(
     slides: any[];
     videos: any[];
     songs: any[];
-    pptxGroups: any[];
+    pdfGroups: any[];
     countdownRemaining: number;
     countdownLabel: string;
     countdownTheme: any;
   }
 ): OutputPayload {
-  const { slides, videos, songs, pptxGroups, countdownRemaining, countdownLabel, countdownTheme } = data;
+  const { slides, videos, songs, pdfGroups, countdownRemaining, countdownLabel, countdownTheme } = data;
 
   switch (item.type) {
     case "image": {
@@ -571,14 +571,13 @@ function buildOutputPayload(
         },
       };
     }
-    case "pptx": {
-      const group = pptxGroups.find((g) => g.id === item.refId);
+    case "pdf": {
+      const group = pdfGroups.find((g) => g.id === item.refId);
       if (!group) return { mode: "blank" };
       const slideIdx = item.slideIndex ?? 0;
-      const slide = group.slides[slideIdx];
-      if (!slide) return { mode: "blank" };
-      if (slide.html) return { mode: "html", html: { content: slide.html } };
-      return { mode: "image", image: { src: slide.src } };
+      const page = group.pages[slideIdx];
+      if (!page) return { mode: "blank" };
+      return { mode: "image", image: { src: page.src } };
     }
     case "countdown":
       return {
@@ -603,7 +602,7 @@ function getItemIcon(type: ShowItem["type"]): string {
       return "🎵";
     case "countdown":
       return "⏱️";
-    case "pptx":
+    case "pdf":
       return "📊";
   }
 }
@@ -614,7 +613,7 @@ function getItemLabel(
   slides: any[],
   videos: any[],
   songs: any[],
-  pptxGroups: any[]
+  pdfGroups: any[]
 ): string {
   switch (type) {
     case "image": {
@@ -629,9 +628,9 @@ function getItemLabel(
       const song = songs.find((s) => s.id === refId);
       return song ? `Song: ${song.title}` : "Song";
     }
-    case "pptx": {
-      const group = pptxGroups.find((g) => g.id === refId);
-      return group ? `PPTX: ${group.name}` : "Presentation";
+    case "pdf": {
+      const group = pdfGroups.find((g) => g.id === refId);
+      return group ? `PowerPoint: ${group.name}` : "Document";
     }
     case "countdown":
       return "Countdown";
@@ -642,13 +641,13 @@ interface AddToShowModalProps {
   slides: any[];
   videos: any[];
   songs: any[];
-  pptxGroups: any[];
+  pdfGroups: any[];
   onAdd: (type: ShowItem["type"], refId?: string) => void;
   onClose: () => void;
 }
 
-function AddToShowModal({ slides, videos, songs, pptxGroups, onAdd, onClose }: AddToShowModalProps) {
-  const [activeSection, setActiveSection] = useState<"media" | "songs" | "pptx" | "countdown">("media");
+function AddToShowModal({ slides, videos, songs, pdfGroups, onAdd, onClose }: AddToShowModalProps) {
+  const [activeSection, setActiveSection] = useState<"media" | "songs" | "pdf" | "countdown">("media");
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={onClose}>
@@ -682,12 +681,12 @@ function AddToShowModal({ slides, videos, songs, pptxGroups, onAdd, onClose }: A
             🎵 Songs
           </button>
           <button
-            onClick={() => setActiveSection("pptx")}
+            onClick={() => setActiveSection("pdf")}
             className={`flex-1 text-xs py-2 transition-all ${
-              activeSection === "pptx" ? "text-[#f97316] border-b-2 border-[#f97316]" : "text-[#888]"
+              activeSection === "pdf" ? "text-[#f97316] border-b-2 border-[#f97316]" : "text-[#888]"
             }`}
           >
-            📊 PPTX
+            📊 PowerPoint
           </button>
           <button
             onClick={() => setActiveSection("countdown")}
@@ -788,17 +787,17 @@ function AddToShowModal({ slides, videos, songs, pptxGroups, onAdd, onClose }: A
             </div>
           )}
 
-          {activeSection === "pptx" && (
+          {activeSection === "pdf" && (
             <div className="space-y-1">
-              {pptxGroups.length === 0 ? (
+              {pdfGroups.length === 0 ? (
                 <p className="text-xs text-center py-4" style={{ color: "#666" }}>
-                  No PowerPoint presentations available. Import PPTX first.
+                  Keine PowerPoint-Präsentationen verfügbar. Importiere PDFs zuerst.
                 </p>
               ) : (
-                pptxGroups.map((group) => (
+                pdfGroups.map((group) => (
                   <button
                     key={group.id}
-                    onClick={() => onAdd("pptx", group.id)}
+                    onClick={() => onAdd("pdf", group.id)}
                     className="w-full flex items-center gap-2 p-2 rounded-lg text-left transition-all hover:bg-[#222]"
                     style={{ background: "#141414", border: "1px solid #222" }}
                   >
@@ -808,7 +807,7 @@ function AddToShowModal({ slides, videos, songs, pptxGroups, onAdd, onClose }: A
                         {group.name}
                       </p>
                       <p className="text-[9px] truncate" style={{ color: "#666" }}>
-                        {group.slides.length} slides
+                        {group.pages.length} Seiten
                       </p>
                     </div>
                   </button>

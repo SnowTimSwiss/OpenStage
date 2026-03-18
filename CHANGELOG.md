@@ -2,22 +2,44 @@
 
 Alle wesentlichen Änderungen an OpenStage werden in dieser Datei dokumentiert.
 
-## [1.1.0] - 2026-03-17
+## [1.1.0] - 2026-03-18
 
 ### Hinzugefügt
 - **Show Mode (Show Tab)** – Neuer Live-Control-View für Events
-  - Show Queue mit allen Items (Images, Videos, Songs, Countdown, PPTX)
+  - Show Queue mit allen Items (Images, Videos, Songs, Countdown, PDFs)
   - Vorschau-Fenster für aktuelles Item
   - Drag & Drop zum Sortieren der Queue
   - Keyboard-Controls: ←→ für Slides, ↑↓ für Items, Space für Next
-  - Slide-Navigation für Songs und PowerPoint-Präsentationen
+  - Slide-Navigation für Songs und PDF-Präsentationen
   - "Add to Show" Modal zur einfachen Auswahl
-  - Unterstützung für PowerPoint-Präsentationen mit Folien-Navigation
+  - Unterstützung für PDF-Präsentationen mit Seiten-Navigation
   - Live-Indicator für aktuelles Item
+- **PDF Import** (PowerPoint als PDF exportieren)
+  - Exportiere PowerPoint als PDF für perfekte Layout-Treue
+  - Automatische Anleitung beim Import
+  - Alle Seiten werden einzeln gerendert
+  - HiDPI Rendering für gestochen scharfe Darstellung
+  - Präsentationsmodus mit Tastatursteuerung (Pfeiltasten, ESC)
+- **Song Import/Export**
+  - Songs als JSON-Datei exportieren und importieren
+  - Einfaches, menschenlesbares Format
+  - Beispiel-Datei `example-song.json` enthalten
+  - Import-Validierung für korrektes Format
+- **Apple Silicon Support** (macOS ARM64/M1/M2/M3)
+  - Separate Builds für Intel und Apple Silicon
+  - Optimierte Performance auf M-Chips
 
 ### Geändert
 - Preview im Show Tab vereinfacht (nur noch 1 Fenster)
 - Output-System erweitert für Show-Item-Wiedergabe
+- **Release Naming Scheme** normalisiert
+  - Einheitliches Format: `openstage-v{version}-{platform}-{variant}.{ext}`
+  - Klare Unterscheidung nach Plattform und Installationsart
+  - Beispiel: `openstage-v1.1.0-windows-x64-setup.exe`
+
+### Entfernt
+- **PPTXjs Abhängigkeit** - Wechsel zu PDF-basiertem Import
+- **LibreOffice Dependency** - Nicht mehr benötigt
 
 ## [1.0.0] - 2026-03-16
 

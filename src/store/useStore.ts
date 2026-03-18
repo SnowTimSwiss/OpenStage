@@ -7,7 +7,7 @@ import { secondsUntilTargetTime } from "../lib/formatTime";
 import { getSpotifyPlaylistId, resolveSpotifyClientId } from "../lib/spotify";
 import type {
   Song, MediaItem, MusicItem, Playlist, SpotifyAuthState, MusicSource,
-  Monitor, TabId, OutputMode, PptxGroup, CountdownTheme, ShowItem,
+  Monitor, TabId, OutputMode, PdfGroup, CountdownTheme, ShowItem,
 } from "../types";
 
 const STORAGE_KEY = "openstage-settings-v1";
@@ -507,13 +507,13 @@ interface Store {
   reorderSlides: (fromIndex: number, toIndex: number) => void;
   removeSlide: (id: string) => void;
 
-  // ── PPTX Groups ────────────────────────────────────────────────────────
-  pptxGroups: PptxGroup[];
+  // ── PDF Groups ────────────────────────────────────────────────────────
+  pdfGroups: PdfGroup[];
   expandedGroupId: string | null;
-  loadPptx: () => Promise<void>;
+  loadPdf: () => Promise<void>;
   toggleExpandGroup: (groupId: string) => void;
   removeGroup: (groupId: string) => void;
-  goLiveSlideFromGroup: (groupId: string, slideIndex: number) => void;
+  goLivePageFromGroup: (groupId: string, pageIndex: number) => void;
 
   // ── Songs ──────────────────────────────────────────────────────────────
   songs: Song[];
@@ -629,7 +629,7 @@ interface Store {
   updateShowItemSlideIndex: (itemId: string, slideIndex: number) => void;
   showNext: () => void;
   showPrevious: () => void;
-  showNextSlide: () => void; // next slide within current item (for songs/pptx)
+  showNextSlide: () => void; // next slide within current item (for songs/pdf)
   showPreviousSlide: () => void; // previous slide within current item
   reorderShowQueue: (fromIndex: number, toIndex: number) => void;
   clearShowQueue: () => void;
@@ -779,59 +779,90 @@ export const useStore = create<Store>((set, get) => ({
   removeSlide: (id) =>
     set((s) => ({ slides: s.slides.filter((x) => x.id !== id) })),
 
-  // ── PPTX Groups ────────────────────────────────────────────────────────
-  pptxGroups: [],
+  // ── PDF Groups ────────────────────────────────────────────────────────
+  pdfGroups: [],
   expandedGroupId: null,
 
-  loadPptx: async () => {
+  loadPdf: async () => {
     const { setLoading, setError, clearError } = get();
-    
+
     try {
       setLoading(true);
       clearError();
       const { readFile } = await import("@tauri-apps/plugin-fs");
-      const { pptxToHtml } = await import("@jvmr/pptx-to-html");
-      
+      const pdfjsLib = await import("pdfjs-dist");
+
+      // Configure PDF.js worker
+      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+        "pdfjs-dist/build/pdf.worker.mjs",
+        import.meta.url
+      ).toString();
+
       const files = await openDialog({
         multiple: true,
-        filters: [{ name: "PowerPoint", extensions: ["pptx"] }],
+        filters: [{ name: "PDF", extensions: ["pdf"] }],
       });
       if (!files) return;
       const arr = Array.isArray(files) ? files : [files];
 
       for (const file of arr) {
         const filePath = file as string;
-        
+
         const raw = await readFile(filePath);
         const bytes = raw instanceof Uint8Array ? raw : new Uint8Array(raw as ArrayLike<number>);
-        const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-        const slideHtml = await pptxToHtml(buffer, { scaleToFit: false, letterbox: true });
-        if (!Array.isArray(slideHtml) || slideHtml.length === 0) {
-          throw new Error("Keine Folien gefunden. Bitte pruefe die PPTX-Datei oder exportiere sie erneut aus PowerPoint.");
-        }
-        const groupId = crypto.randomUUID();
+        
+        const loadingTask = pdfjsLib.getDocument({ data: bytes });
+        const pdf = await loadingTask.promise;
 
+        if (pdf.numPages === 0) {
+          throw new Error("Keine Seiten gefunden. Bitte pruefe die PDF-Datei. (PowerPoint als PDF exportieren)");
+        }
+
+        const groupId = crypto.randomUUID();
         const fileName =
           filePath.split("\\").pop() ??
           filePath.split("/").pop() ??
-          "Presentation";
+          "Document";
 
-        const slides: MediaItem[] = slideHtml.map((html: string, index: number) => ({
-          id: crypto.randomUUID(),
-          name: `Folie ${index + 1}`,
-          path: filePath,
-          src: "",
-          html,
-          type: "image",
-          groupId,
-        }));
+        // Render all pages to canvas
+        const pages: MediaItem[] = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const viewport = page.getViewport({ scale: 2 }); // HiDPI scale
+
+          const canvas = document.createElement("canvas");
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          const context = canvas.getContext("2d");
+
+          if (!context) continue;
+
+          await page.render({
+            canvasContext: context,
+            canvas,
+            viewport,
+          }).promise;
+
+          // Convert canvas to base64 data URL
+          const dataUrl = canvas.toDataURL("image/png");
+
+          pages.push({
+            id: crypto.randomUUID(),
+            name: `Seite ${i}`,
+            path: filePath,
+            src: dataUrl,
+            type: "pdf",
+            groupId,
+            pageNumber: i,
+          });
+        }
 
         set((s) => ({
-          pptxGroups: [...s.pptxGroups, { id: groupId, name: fileName, slides }],
+          pdfGroups: [...s.pdfGroups, { id: groupId, name: fileName, pages }],
         }));
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Fehler beim Laden der PowerPoint-Datei");
+      setError(err instanceof Error ? err.message : "Fehler beim Laden der PDF-Datei");
     } finally {
       setLoading(false);
     }
@@ -842,21 +873,16 @@ export const useStore = create<Store>((set, get) => ({
 
   removeGroup: (groupId) =>
     set((s) => ({
-      pptxGroups: s.pptxGroups.filter((g) => g.id !== groupId),
+      pdfGroups: s.pdfGroups.filter((g) => g.id !== groupId),
       slides: s.slides.filter((x) => x.groupId !== groupId),
     })),
 
-  goLiveSlideFromGroup: (groupId, slideIndex) => {
-    const group = get().pptxGroups.find((g) => g.id === groupId);
-    if (!group || !group.slides[slideIndex]) return;
-    const slide = group.slides[slideIndex];
-    if (slide.html) {
-      set({ activeSlideId: slide.id, outputMode: "html", isBlackout: false });
-      sendToOutput({ mode: "html", html: { content: slide.html } });
-      return;
-    }
-    set({ activeSlideId: slide.id, outputMode: "image", isBlackout: false });
-    sendToOutput({ mode: "image", image: { src: slide.src } });
+  goLivePageFromGroup: (groupId, pageIndex) => {
+    const group = get().pdfGroups.find((g) => g.id === groupId);
+    if (!group || !group.pages[pageIndex]) return;
+    const page = group.pages[pageIndex];
+    set({ activeSlideId: page.id, outputMode: "image", isBlackout: false });
+    sendToOutput({ mode: "image", image: { src: page.src } });
   },
 
   // ── Songs ──────────────────────────────────────────────────────────────
@@ -1859,7 +1885,7 @@ export const useStore = create<Store>((set, get) => ({
 
   showNextSlide: () => {
     const state = get();
-    const { showQueue, showCurrentIndex, songs, pptxGroups } = state;
+    const { showQueue, showCurrentIndex, songs, pdfGroups } = state;
     if (showQueue.length === 0 || showCurrentIndex < 0) return;
 
     const currentItem = showQueue[showCurrentIndex];
@@ -1875,13 +1901,13 @@ export const useStore = create<Store>((set, get) => ({
       }
     }
 
-    // For pptx: increment slide index
-    if (currentItem.type === "pptx" && currentItem.refId) {
-      const group = pptxGroups.find((g) => g.id === currentItem.refId);
+    // For pdf: increment page index
+    if (currentItem.type === "pdf" && currentItem.refId) {
+      const group = pdfGroups.find((g) => g.id === currentItem.refId);
       if (group) {
-        const currentSlideIndex = currentItem.slideIndex ?? 0;
-        const nextSlideIndex = Math.min(group.slides.length - 1, currentSlideIndex + 1);
-        state.updateShowItemSlideIndex(currentItem.id, nextSlideIndex);
+        const currentPageIndex = currentItem.slideIndex ?? 0;
+        const nextPageIndex = Math.min(group.pages.length - 1, currentPageIndex + 1);
+        state.updateShowItemSlideIndex(currentItem.id, nextPageIndex);
         return;
       }
     }
@@ -1892,7 +1918,7 @@ export const useStore = create<Store>((set, get) => ({
 
   showPreviousSlide: () => {
     const state = get();
-    const { showQueue, showCurrentIndex, songs, pptxGroups } = state;
+    const { showQueue, showCurrentIndex, songs, pdfGroups } = state;
     if (showQueue.length === 0 || showCurrentIndex < 0) return;
 
     const currentItem = showQueue[showCurrentIndex];
@@ -1908,13 +1934,13 @@ export const useStore = create<Store>((set, get) => ({
       }
     }
 
-    // For pptx: decrement slide index
-    if (currentItem.type === "pptx" && currentItem.refId) {
-      const group = pptxGroups.find((g) => g.id === currentItem.refId);
+    // For pdf: decrement page index
+    if (currentItem.type === "pdf" && currentItem.refId) {
+      const group = pdfGroups.find((g) => g.id === currentItem.refId);
       if (group) {
-        const currentSlideIndex = currentItem.slideIndex ?? 0;
-        const prevSlideIndex = Math.max(0, currentSlideIndex - 1);
-        state.updateShowItemSlideIndex(currentItem.id, prevSlideIndex);
+        const currentPageIndex = currentItem.slideIndex ?? 0;
+        const prevPageIndex = Math.max(0, currentPageIndex - 1);
+        state.updateShowItemSlideIndex(currentItem.id, prevPageIndex);
         return;
       }
     }

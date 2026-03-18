@@ -1,0 +1,21 @@
+{
+  "title": "Beispiel Lied",
+  "artist": "Unbekannt",
+  "slides": [
+    {
+      "id": "slide-1",
+      "text": "Dies ist die erste Strophe\ndes Beispiel-Liedes.\n\nHier steht der Text.",
+      "label": "Strophe 1"
+    },
+    {
+      "id": "slide-2",
+      "text": "Dies ist der Refrain\nder immer wiederholt wird.\n\nAlle singen mit!",
+      "label": "Refrain"
+    },
+    {
+      "id": "slide-3",
+      "text": "Noch eine Strophe\nmit neuem Text.\n\nBald ist das Lied vorbei.",
+      "label": "Strophe 2"
+    }
+  ]
+}

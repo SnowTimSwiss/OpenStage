@@ -1,6 +1,8 @@
 import { useState, useMemo } from "react";
 import { useStore } from "../../store/useStore";
 import type { Song, SongSlide } from "../../types";
+import { save as saveFile, open as openFile } from "@tauri-apps/plugin-dialog";
+import { writeFile, readFile } from "@tauri-apps/plugin-fs";
 
 type View = "list" | "editor" | "live";
 
@@ -59,6 +61,42 @@ export default function SongsTab() {
     }
     setView("list");
     setEditingSong(null);
+  }
+
+  async function exportSong(song: Song) {
+    const filePath = await saveFile({
+      title: "Song exportieren",
+      defaultPath: `${song.title.replace(/[^a-z0-9]/gi, "_")}.json`,
+      filters: [{ name: "Song JSON", extensions: ["json"] }],
+    });
+    if (!filePath) return;
+
+    const songData = JSON.stringify(song, null, 2);
+    await writeFile(filePath, new TextEncoder().encode(songData));
+  }
+
+  async function importSong() {
+    const filePath = await openFile({
+      title: "Song importieren",
+      filters: [{ name: "Song JSON", extensions: ["json"] }],
+    });
+    if (!filePath) return;
+
+    try {
+      const content = await readFile(filePath);
+      const songData = new TextDecoder().decode(content);
+      const song: Omit<Song, "id"> = JSON.parse(songData);
+      
+      // Validate basic structure
+      if (!song.title || !Array.isArray(song.slides)) {
+        throw new Error("Ungültiges Song-Format");
+      }
+      
+      addSong(song);
+    } catch (err) {
+      console.error("Failed to import song:", err);
+      alert("Fehler beim Importieren: Ungültiges Song-Format");
+    }
   }
 
   // ── EDITOR ────────────────────────────────────────────────────────────────
@@ -153,13 +191,23 @@ export default function SongsTab() {
       <div className="flex flex-col gap-3 px-4 py-3 border-b" style={{ borderColor: "#252525" }}>
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-white">Lieder</h2>
-          <button
-            onClick={startNew}
-            className="text-xs px-3 py-1.5 rounded font-medium"
-            style={{ background: "#f97316", color: "white" }}
-          >
-            + Neues Lied
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={importSong}
+              className="text-xs px-3 py-1.5 rounded font-medium"
+              style={{ background: "#1f1f1f", color: "#7c3aed", border: "1px solid #333" }}
+              title="Song aus JSON-Datei importieren"
+            >
+              📥 Import
+            </button>
+            <button
+              onClick={startNew}
+              className="text-xs px-3 py-1.5 rounded font-medium"
+              style={{ background: "#f97316", color: "white" }}
+            >
+              + Neues Lied
+            </button>
+          </div>
         </div>
         {/* Search */}
         <input
@@ -212,9 +260,18 @@ export default function SongsTab() {
                 </div>
                 <div className="flex gap-1.5 shrink-0">
                   <button
+                    onClick={() => exportSong(song)}
+                    className="text-xs px-2 py-1 rounded"
+                    style={{ background: "#1f1f1f", color: "#7c3aed" }}
+                    title="Exportieren"
+                  >
+                    📤
+                  </button>
+                  <button
                     onClick={() => startEdit(song)}
                     className="text-xs px-2 py-1 rounded"
                     style={{ background: "#222", color: "#777" }}
+                    title="Bearbeiten"
                   >
                     ✏️
                   </button>
@@ -229,6 +286,7 @@ export default function SongsTab() {
                     onClick={() => removeSong(song.id)}
                     className="text-xs px-2 py-1 rounded"
                     style={{ background: "#2a0a0a", color: "#ef4444" }}
+                    title="Löschen"
                   >
                     ✕
                   </button>

@@ -14,11 +14,11 @@
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css,json}\""
   },
   "dependencies": {
-    "@jvmr/pptx-to-html": "^1.0.0",
     "@tauri-apps/api": "^2.1.1",
     "@tauri-apps/plugin-dialog": "^2.0.3",
     "@tauri-apps/plugin-fs": "^2.0.3",
     "@tauri-apps/plugin-opener": "^2.5.3",
+    "pdfjs-dist": "^5.5.207",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^5.0.1"

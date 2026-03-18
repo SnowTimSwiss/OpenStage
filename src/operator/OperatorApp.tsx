@@ -68,7 +68,7 @@ function PreviewPanel() {
   const songs = useStore((s) => s.songs);
   const activeSlideId = useStore((s) => s.activeSlideId);
   const slides = useStore((s) => s.slides);
-  const pptxGroups = useStore((s) => s.pptxGroups);
+  const pdfGroups = useStore((s) => s.pdfGroups);
   const countdownRemaining = useStore((s) => s.countdownRemaining);
   const countdownLabel = useStore((s) => s.countdownLabel);
   const countdownTheme = useStore((s) => s.countdownTheme);
@@ -91,7 +91,7 @@ function PreviewPanel() {
   const activeSong = songs.find((s) => s.id === activeSongId);
   const activeSlide =
     slides.find((s) => s.id === activeSlideId) ??
-    pptxGroups.flatMap((g) => g.slides).find((s) => s.id === activeSlideId);
+    pdfGroups.flatMap((g) => g.pages).find((s) => s.id === activeSlideId);
   const activeVideo = videos.find((v) => v.id === activeVideoId);
   const currentMusic = music[musicIndex];
 
@@ -102,9 +102,6 @@ function PreviewPanel() {
   const previewPayload = useMemo<OutputPayload>(() => {
     if (isBlackout) return { mode: "blackout" };
     if ((outputMode === "image" || outputMode === "html") && activeSlide) {
-      if (activeSlide.html) {
-        return { mode: "html", html: { content: activeSlide.html } };
-      }
       return { mode: "image", image: { src: activeSlide.src } };
     }
     if (outputMode === "song" && activeSong) {

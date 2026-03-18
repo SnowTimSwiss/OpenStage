@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../../store/useStore";
 import { openOutputWindow, sendVideoControl } from "../../lib/events";
-import PptxHtmlFrame from "../../components/PptxHtmlFrame";
 
-type FilterType = "all" | "image" | "video" | "pptx";
+type FilterType = "all" | "image" | "video" | "pdf";
 
 function alternateAssetUrl(src: string): string | null {
   // Tauri can expose assets via `asset://localhost/...` and `http(s)://asset.localhost/...`.
@@ -29,8 +28,9 @@ function alternateAssetUrl(src: string): string | null {
 export default function MediaTab() {
 	  const [filter, setFilter] = useState<FilterType>("all");
 	  const [_viewMode, _setViewMode] = useState<"grid" | "list">("grid");
-	  const [pptxPresentation, setPptxPresentation] = useState<{ groupId: string; index: number } | null>(null);
+	  const [pdfPresentation, setPdfPresentation] = useState<{ groupId: string; index: number } | null>(null);
 	  const [isTransitioning, setIsTransitioning] = useState(false);
+	  const [showPptxHint, setShowPptxHint] = useState(false);
 
   // Slides (images)
 	  const slides = useStore((s) => s.slides);
@@ -48,13 +48,13 @@ export default function MediaTab() {
   const goLiveVideo = useStore((s) => s.goLiveVideo);
   const removeVideo = useStore((s) => s.removeVideo);
 
-  // PPTX Groups
-	  const pptxGroups = useStore((s) => s.pptxGroups);
+  // PDF Groups
+	  const pdfGroups = useStore((s) => s.pdfGroups);
 	  const expandedGroupId = useStore((s) => s.expandedGroupId);
-	  const loadPptx = useStore((s) => s.loadPptx);
+	  const loadPdf = useStore((s) => s.loadPdf);
 	  const toggleExpandGroup = useStore((s) => s.toggleExpandGroup);
 	  const removeGroup = useStore((s) => s.removeGroup);
-	  const goLiveSlideFromGroup = useStore((s) => s.goLiveSlideFromGroup);
+	  const goLivePageFromGroup = useStore((s) => s.goLivePageFromGroup);
 	  const outputMonitorIndex = useStore((s) => s.outputMonitorIndex);
 	  const outputWindowOpen = useStore((s) => s.outputWindowOpen);
 	  const setOutputMonitor = useStore((s) => s.setOutputMonitor);
@@ -68,17 +68,17 @@ export default function MediaTab() {
 	  const [retryImages, setRetryImages] = useState<Record<string, boolean>>({});
 
 	  const presentationGroup = useMemo(() => {
-	    if (!pptxPresentation) return null;
-	    return pptxGroups.find((g) => g.id === pptxPresentation.groupId) ?? null;
-	  }, [pptxGroups, pptxPresentation]);
+	    if (!pdfPresentation) return null;
+	    return pdfGroups.find((g) => g.id === pdfPresentation.groupId) ?? null;
+	  }, [pdfGroups, pdfPresentation]);
 
-	  const presentationSlides = presentationGroup?.slides ?? [];
-	  const presentationIndex = pptxPresentation?.index ?? 0;
-	  const presentationCurrent = presentationSlides[presentationIndex];
-	  const presentationNext = presentationSlides[presentationIndex + 1];
+	  const presentationPages = presentationGroup?.pages ?? [];
+	  const presentationIndex = pdfPresentation?.index ?? 0;
+	  const presentationCurrent = presentationPages[presentationIndex];
+	  const presentationNext = presentationPages[presentationIndex + 1];
 
 	  function closePresentation() {
-	    setPptxPresentation(null);
+	    setPdfPresentation(null);
 	  }
 
 	  async function ensureOutputVisible() {
@@ -98,30 +98,30 @@ export default function MediaTab() {
 	  }
 
 	  async function startPresentation(groupId: string) {
-	    const group = pptxGroups.find((g) => g.id === groupId);
-	    if (!group || group.slides.length === 0) return;
+	    const group = pdfGroups.find((g) => g.id === groupId);
+	    if (!group || group.pages.length === 0) return;
 	    await ensureOutputVisible();
-	    setPptxPresentation({ groupId, index: 0 });
-	    goLiveSlideFromGroup(groupId, 0);
+	    setPdfPresentation({ groupId, index: 0 });
+	    goLivePageFromGroup(groupId, 0);
 	  }
 
 	  function stepPresentation(delta: number) {
-	    if (!pptxPresentation) return;
-	    const group = pptxGroups.find((g) => g.id === pptxPresentation.groupId);
+	    if (!pdfPresentation) return;
+	    const group = pdfGroups.find((g) => g.id === pdfPresentation.groupId);
 	    if (!group) return;
-	    const nextIndex = Math.max(0, Math.min(group.slides.length - 1, pptxPresentation.index + delta));
-	    if (nextIndex === pptxPresentation.index) return;
-	    
+	    const nextIndex = Math.max(0, Math.min(group.pages.length - 1, pdfPresentation.index + delta));
+	    if (nextIndex === pdfPresentation.index) return;
+
 	    // Trigger transition animation
 	    setIsTransitioning(true);
 	    setTimeout(() => setIsTransitioning(false), 300);
-	    
-	    setPptxPresentation({ groupId: pptxPresentation.groupId, index: nextIndex });
-	    goLiveSlideFromGroup(pptxPresentation.groupId, nextIndex);
+
+	    setPdfPresentation({ groupId: pdfPresentation.groupId, index: nextIndex });
+	    goLivePageFromGroup(pdfPresentation.groupId, nextIndex);
 	  }
 
 	  useEffect(() => {
-	    if (!pptxPresentation) return;
+	    if (!pdfPresentation) return;
 	    function onKey(e: KeyboardEvent) {
 	      if (e.code === "Escape") {
 	        e.preventDefault();
@@ -142,7 +142,7 @@ export default function MediaTab() {
 	    }
 	    window.addEventListener("keydown", onKey, true);
 	    return () => window.removeEventListener("keydown", onKey, true);
-	  }, [pptxPresentation, pptxGroups]);
+	  }, [pdfPresentation, pdfGroups]);
 
 	  function handleImageError(slideId: string, slideName: string, slideSrc: string) {
 	    console.warn("Failed to load image:", slideName, slideSrc?.substring(0, 80));
@@ -189,7 +189,7 @@ export default function MediaTab() {
 
 
 
-  const totalImages = slides.length + pptxGroups.reduce((acc, g) => acc + g.slides.length, 0);
+  const totalImages = slides.length + pdfGroups.reduce((acc, g) => acc + g.pages.length, 0);
   const totalVideos = videos.length;
 
 	  return (
@@ -209,19 +209,19 @@ export default function MediaTab() {
             <FilterButton active={filter === "video"} onClick={() => setFilter("video")}>
               🎬 Videos ({totalVideos})
             </FilterButton>
-            <FilterButton active={filter === "pptx"} onClick={() => setFilter("pptx")}>
-              📁 PPTX ({pptxGroups.length})
+            <FilterButton active={filter === "pdf"} onClick={() => setFilter("pdf")}>
+              📄 PDF ({pdfGroups.length})
             </FilterButton>
           </div>
 
           {/* Add buttons */}
           <button
-            onClick={loadPptx}
+            onClick={() => setShowPptxHint(true)}
             className="text-xs px-3 py-1.5 rounded font-medium transition-colors"
             style={{ background: "#7c3aed", color: "white" }}
-            title="PowerPoint importieren"
+            title="PowerPoint als PDF importieren"
           >
-            + PPTX
+            + PowerPoint
           </button>
           <button
 	            onClick={loadMedia}
@@ -236,12 +236,12 @@ export default function MediaTab() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4">
-        {/* PPTX Groups */}
-        {(filter === "all" || filter === "pptx") && pptxGroups.length > 0 && (
+        {/* PDF Groups */}
+        {(filter === "all" || filter === "pdf") && pdfGroups.length > 0 && (
           <div className="flex flex-col gap-4 mb-6">
-            {pptxGroups.map((group) => {
+            {pdfGroups.map((group) => {
               const isExpanded = expandedGroupId === group.id;
-              
+
               return (
                 <div
                   key={group.id}
@@ -259,12 +259,12 @@ export default function MediaTab() {
                         className="w-8 h-8 rounded flex items-center justify-center"
                         style={{ background: "#7c3aed30" }}
                       >
-                        📁
+                        📄
                       </div>
                       <div>
                         <div className="text-sm font-semibold text-white">{group.name}</div>
                         <div className="text-xs" style={{ color: "#666" }}>
-                          {group.slides.length} Folien
+                          {group.pages.length} Seiten
                         </div>
                       </div>
 	                    </div>
@@ -298,12 +298,12 @@ export default function MediaTab() {
                   {isExpanded && (
                     <div className="px-4 pb-4">
                       <div className="grid grid-cols-4 gap-2">
-                        {group.slides.map((slide, i) => {
-                          const active = slide.id === activeSlideId;
+                        {group.pages.map((page, i) => {
+                          const active = page.id === activeSlideId;
                           return (
                             <button
-                              key={slide.id}
-                              onClick={() => goLiveSlideFromGroup(group.id, i)}
+                              key={page.id}
+                              onClick={() => goLivePageFromGroup(group.id, i)}
                               className="relative group rounded-lg overflow-hidden cursor-pointer transition-all"
                               style={{
                                 border: active ? "2px solid #f97316" : "2px solid #252525",
@@ -312,25 +312,22 @@ export default function MediaTab() {
                             >
                               <div className="aspect-video bg-black relative">
                                 <img
-                                  data-slide-id={slide.id}
-	                                  src={slide.html ? "data:image/gif;base64,R0lGODlhAQABAAAAACw=" : (retryImages[slide.id] ? (alternateAssetUrl(slide.src) ?? slide.src) : slide.src)}
-                                  alt={slide.name}
-                                  className={`w-full h-full object-contain ${slide.html ? "opacity-0" : ""}`}
+                                  data-slide-id={page.id}
+                                  src={retryImages[page.id] ? (alternateAssetUrl(page.src) ?? page.src) : page.src}
+                                  alt={page.name}
+                                  className="w-full h-full object-contain"
                                   draggable={false}
-                                  onError={() => {
-                                    if (!slide.html) handleImageError(slide.id, slide.name, slide.src);
-                                  }}
+                                  onError={() => handleImageError(page.id, page.name, page.src)}
                                 />
-	                                {!slide.html && imageErrors[slide.id] && (
+                                {imageErrors[page.id] && (
                                   <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">
                                     <div className="text-center">
                                       <span className="text-2xl">⚠️</span>
                                       <p className="text-xs text-zinc-500 mt-1">Vorschau nicht verfügbar</p>
-                                      <p className="text-[10px] text-zinc-600 mt-0.5">{slide.name}</p>
+                                      <p className="text-[10px] text-zinc-600 mt-0.5">{page.name}</p>
                                     </div>
                                   </div>
                                 )}
-                                {slide.html && <PptxHtmlFrame html={slide.html} className="absolute inset-0 w-full h-full" />}
                               </div>
                               <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                 <span className="text-white text-xs font-bold">LIVE</span>
@@ -529,28 +526,39 @@ export default function MediaTab() {
         )}
 
         {/* Empty State */}
-        {slides.length === 0 && videos.length === 0 && pptxGroups.length === 0 && (
+        {slides.length === 0 && videos.length === 0 && pdfGroups.length === 0 && (
           <EmptyState
             icon="📁"
             text="Keine Medien geladen"
-            sub="Füge Bilder, Videos oder PowerPoint-Präsentationen hinzu"
+            sub="Füge Bilder, Videos oder PDFs hinzu (PowerPoint als PDF exportieren)"
 	            onAction={loadMedia}
             actionLabel="Medien laden"
           />
         )}
       </div>
 
-	      <Hint text="Tipp: PowerPoint-Dateien werden automatisch in einzelne Folien zerlegt" />
+	      <Hint text="Tipp: Exportiere PowerPoint-Präsentationen als PDF (Datei → Exportieren → PDF erstellen)" />
 
-	      {/* PPTX presenter overlay */}
-	      {pptxPresentation && presentationGroup && presentationCurrent && (
+	      {/* PowerPoint Hint Modal */}
+	      {showPptxHint && (
+	        <PptxHintModal
+	          onClose={() => setShowPptxHint(false)}
+	          onConfirm={() => {
+	            setShowPptxHint(false);
+	            loadPdf();
+	          }}
+	        />
+	      )}
+
+	      {/* PDF presenter overlay */}
+	      {pdfPresentation && presentationGroup && presentationCurrent && (
 	        <div className="absolute inset-0 z-50 bg-black">
 	          <div className="h-full flex flex-col">
 	            <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: "#1a1a1a" }}>
 	              <div className="min-w-0">
 	                <div className="text-sm font-semibold text-white truncate">{presentationGroup.name}</div>
 	                <div className="text-[11px] mt-0.5" style={{ color: "#666" }}>
-	                  Folie {presentationIndex + 1}/{presentationSlides.length} · ESC zum Beenden
+	                  Seite {presentationIndex + 1}/{presentationPages.length} · ESC zum Beenden
 	                </div>
 	              </div>
 	              <button
@@ -569,21 +577,17 @@ export default function MediaTab() {
 	                className="col-span-2 rounded-lg overflow-hidden flex items-center justify-center relative"
 	                style={{ background: "#000", border: "1px solid #1e1e1e" }}
 	              >
-	                {presentationCurrent.html ? (
-	                  <PptxHtmlFrame html={presentationCurrent.html} className="w-full h-full" />
-	                ) : (
-	                  <img
-	                    src={presentationCurrent.src}
-	                    alt=""
-	                    className="w-full h-full object-contain transition-all duration-300 ease-out draggable-false"
-	                    style={{
-	                      opacity: isTransitioning ? 0.5 : 1,
-	                      transform: isTransitioning ? "scale(0.98)" : "scale(1)",
-	                      filter: isTransitioning ? "blur(2px)" : "none",
-	                    }}
-	                    draggable={false}
-	                  />
-	                )}
+	                <img
+	                  src={presentationCurrent.src}
+	                  alt=""
+	                  className="w-full h-full object-contain transition-all duration-300 ease-out draggable-false"
+	                  style={{
+	                    opacity: isTransitioning ? 0.5 : 1,
+	                    transform: isTransitioning ? "scale(0.98)" : "scale(1)",
+	                    filter: isTransitioning ? "blur(2px)" : "none",
+	                  }}
+	                  draggable={false}
+	                />
 	              </div>
 
 	              <div className="col-span-1 flex flex-col gap-3">
@@ -596,20 +600,16 @@ export default function MediaTab() {
 	                  style={{ background: "#0a0a0a", border: "1px solid #1e1e1e" }}
 	                >
 	                  {presentationNext ? (
-	                    presentationNext.html ? (
-	                      <PptxHtmlFrame html={presentationNext.html} className="w-full h-full" />
-	                    ) : (
-	                      <img
-	                        src={presentationNext.src}
-	                        alt=""
-	                        className="w-full h-full object-contain transition-all duration-300 draggable-false"
-	                        style={{
-	                          opacity: isTransitioning ? 0.7 : 1,
-	                          transform: isTransitioning ? "scale(1.05)" : "scale(1)",
-	                        }}
-	                        draggable={false}
-	                      />
-	                    )
+	                    <img
+	                      src={presentationNext.src}
+	                      alt=""
+	                      className="w-full h-full object-contain transition-all duration-300 draggable-false"
+	                      style={{
+	                        opacity: isTransitioning ? 0.7 : 1,
+	                        transform: isTransitioning ? "scale(1.05)" : "scale(1)",
+	                      }}
+	                      draggable={false}
+	                    />
 	                  ) : (
 	                    <span className="text-xs" style={{ color: "#444" }}>Ende</span>
 	                  )}
@@ -650,7 +650,7 @@ export default function MediaTab() {
 	                  </button>
 	                  <button
 	                    onClick={() => stepPresentation(1)}
-	                    disabled={presentationIndex >= presentationSlides.length - 1}
+	                    disabled={presentationIndex >= presentationPages.length - 1}
 	                    className="flex-1 py-3 rounded font-semibold text-sm transition-all disabled:opacity-40"
 	                    style={{ background: "#f97316", color: "white" }}
 	                  >
@@ -711,6 +711,74 @@ function Hint({ text }: { text: string }) {
   return (
     <div className="px-4 py-2 border-t text-[11px]" style={{ borderColor: "#1a1a1a", color: "#444" }}>
       💡 {text}
+    </div>
+  );
+}
+
+function PptxHintModal({ onClose, onConfirm }: { onClose: () => void; onConfirm: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
+      <div
+        className="w-full max-w-md rounded-xl p-6"
+        style={{ background: "#1a1a1a", border: "1px solid #333" }}
+      >
+        <div className="flex items-center gap-3 mb-4">
+          <div
+            className="w-10 h-10 rounded flex items-center justify-center text-xl"
+            style={{ background: "#7c3aed30" }}
+          >
+            📄
+          </div>
+          <div>
+            <h3 className="text-base font-semibold text-white">PowerPoint importieren</h3>
+            <p className="text-xs" style={{ color: "#888" }}>Als PDF exportieren für beste Qualität</p>
+          </div>
+        </div>
+
+        <div className="space-y-3 mb-6">
+          <div className="flex items-start gap-2">
+            <span className="text-[#f97316] font-bold">1.</span>
+            <p className="text-sm text-gray-300">
+              Öffne deine PowerPoint-Präsentation
+            </p>
+          </div>
+          <div className="flex items-start gap-2">
+            <span className="text-[#f97316] font-bold">2.</span>
+            <p className="text-sm text-gray-300">
+              Gehe zu <strong className="text-white">Datei → Exportieren → PDF/XPS erstellen</strong>
+            </p>
+          </div>
+          <div className="flex items-start gap-2">
+            <span className="text-[#f97316] font-bold">3.</span>
+            <p className="text-sm text-gray-300">
+              Speichere die PDF-Datei
+            </p>
+          </div>
+          <div className="flex items-start gap-2">
+            <span className="text-[#f97316] font-bold">4.</span>
+            <p className="text-sm text-gray-300">
+              Klicke unten auf "PDF auswählen" und wähle die exportierte Datei
+            </p>
+          </div>
+        </div>
+
+        <div className="flex gap-2 justify-end">
+          <button
+            onClick={onClose}
+            className="text-xs px-4 py-2 rounded font-medium"
+            style={{ background: "#2a2a2a", color: "#888" }}
+          >
+            Abbrechen
+          </button>
+          <button
+            onClick={onConfirm}
+            className="text-xs px-4 py-2 rounded font-medium"
+            style={{ background: "#7c3aed", color: "white" }}
+          >
+            PDF auswählen
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

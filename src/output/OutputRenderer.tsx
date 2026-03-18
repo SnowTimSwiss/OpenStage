@@ -1,6 +1,5 @@
 import type { RefObject } from "react";
 import type { OutputPayload } from "../types";
-import PptxHtmlFrame from "../components/PptxHtmlFrame";
 
 function formatTime(s: number) {
   const m = Math.floor(s / 60);
@@ -73,7 +72,12 @@ export default function OutputRenderer({
         className={`${rootClassName} bg-black flex items-center justify-center transition-opacity duration-300`}
         style={transitionStyle}
       >
-        <PptxHtmlFrame html={state.html.content} className="w-full h-full" />
+        <img
+          src={state.html.content}
+          alt=""
+          className="w-full h-full object-contain"
+          draggable={false}
+        />
       </div>
     );
   }
