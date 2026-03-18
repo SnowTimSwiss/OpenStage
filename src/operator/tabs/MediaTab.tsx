@@ -54,9 +54,9 @@ export default function MediaTab() {
   const toggleExpandGroup = useStore((s) => s.toggleExpandGroup);
   const removeGroup = useStore((s) => s.removeGroup);
   const goLivePageFromGroup = useStore((s) => s.goLivePageFromGroup);
-  const outputMonitorIndex = useStore((s) => s.outputMonitorIndex);
-  const outputWindowOpen = useStore((s) => s.outputWindowOpen);
-  const setOutputMonitor = useStore((s) => s.setOutputMonitor);
+  const outputMonitorIndices = useStore((s) => s.outputMonitorIndices);
+  const outputWindowsOpen = useStore((s) => s.outputWindowsOpen);
+  const toggleOutputMonitor = useStore((s) => s.toggleOutputMonitor);
 
   // Drag & Drop State
   const dragIndex = useStore((s) => (s as any).dragIndex ?? -1);
@@ -81,17 +81,14 @@ export default function MediaTab() {
   }
 
   async function ensureOutputVisible() {
-    // If a monitor is configured, make sure the output window is opened and placed there.
-    if (outputMonitorIndex !== null) {
-      try {
-        // Calling with the same index is fine; it will (re)open/reposition.
-        await setOutputMonitor(outputMonitorIndex);
-      } catch {
-        // Fall through to just opening the output window.
-      }
+    // If at least one monitor is configured, make sure the output windows are opened.
+    if (outputMonitorIndices.length > 0) {
+      // Windows are already opened by the store, just verify they're visible
+      // The store handles opening windows for all configured monitors
     }
 
-    if (!useStore.getState().outputWindowOpen && !outputWindowOpen) {
+    // If no output windows are open, open one on the first available monitor
+    if (outputMonitorIndices.length === 0) {
       await openOutputWindow();
     }
   }

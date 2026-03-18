@@ -3,10 +3,10 @@ import { useStore } from "../../store/useStore";
 
 export default function DisplayTab() {
   const monitors = useStore((s) => s.monitors);
-  const outputMonitorIndex = useStore((s) => s.outputMonitorIndex);
-  const outputWindowOpen = useStore((s) => s.outputWindowOpen);
+  const outputMonitorIndices = useStore((s) => s.outputMonitorIndices);
+  const outputWindowsOpen = useStore((s) => s.outputWindowsOpen);
   const fetchMonitors = useStore((s) => s.fetchMonitors);
-  const setOutputMonitor = useStore((s) => s.setOutputMonitor);
+  const toggleOutputMonitor = useStore((s) => s.toggleOutputMonitor);
   const error = useStore((s) => s.error);
   const clearError = useStore((s) => s.clearError);
   const [isProcessing, setIsProcessing] = useState<number | null>(null);
@@ -24,13 +24,7 @@ export default function DisplayTab() {
   async function handleToggleOutput(i: number) {
     setIsProcessing(i);
     try {
-      if (outputMonitorIndex === i) {
-        // Deselect - close output window
-        await setOutputMonitor(null);
-      } else {
-        // Select this monitor as output
-        await setOutputMonitor(i);
-      }
+      await toggleOutputMonitor(i);
     } catch (err) {
       console.error("Failed to toggle output:", err);
     } finally {
@@ -65,9 +59,9 @@ export default function DisplayTab() {
             <div className="text-sm leading-relaxed" style={{ color: "#888" }}>
               <p className="font-semibold text-white mb-1">So funktioniert's:</p>
               <ul className="space-y-1 text-xs">
-                <li>• Wähle einen Monitor als <span className="text-orange-500">Ausgabedisplay</span> (Beamer)</li>
+                <li>• Wähle <span className="text-orange-500">einen oder mehrere Monitore</span> als Ausgabedisplays (Beamer)</li>
                 <li>• Das Operator-Fenster bleibt auf diesem Bildschirm</li>
-                <li>• Das Ausgabefenster wird automatisch im Vollbild geöffnet</li>
+                <li>• Die Ausgabefenster werden automatisch im Vollbild geöffnet</li>
                 <li>• Klicke erneut auf "Ausgabe" um es zu deaktivieren</li>
               </ul>
             </div>
@@ -97,7 +91,8 @@ export default function DisplayTab() {
           ) : (
             <div className="flex flex-col gap-3">
               {monitors.map((m, i) => {
-                const isOutput = outputMonitorIndex === i;
+                const isOutput = outputMonitorIndices.includes(i);
+                const isWindowOpen = outputWindowsOpen[i] === true;
                 const isPrimary = i === 0;
                 const isLoading = isProcessing === i;
 
@@ -141,7 +136,7 @@ export default function DisplayTab() {
                             Haupt
                           </div>
                         )}
-                        {isOutput && !isLoading && (
+                        {isOutput && isWindowOpen && !isLoading && (
                           <div
                             className="absolute -top-1.5 -right-1.5 text-[8px] px-1.5 py-0.5 rounded live-dot"
                             style={{ background: "#f97316", color: "white", border: "1px solid #f97316" }}
@@ -162,7 +157,7 @@ export default function DisplayTab() {
                         <div className="text-xs mt-0.5" style={{ color: "#555" }}>
                           {m.width} × {m.height} px · Position ({m.x}, {m.y})
                         </div>
-                        {isOutput && outputWindowOpen && (
+                        {isOutput && isWindowOpen && (
                           <div className="text-xs mt-1" style={{ color: "#22c55e" }}>
                             ● Ausgabefenster aktiv
                           </div>
@@ -193,7 +188,7 @@ export default function DisplayTab() {
         </div>
 
         {/* Status Box */}
-        {outputMonitorIndex !== null && monitors[outputMonitorIndex] && (
+        {outputMonitorIndices.length > 0 && (
           <div
             className="rounded-xl p-4"
             style={{ background: "#0a1f0a", border: "1px solid #1a4a1a" }}
@@ -209,7 +204,7 @@ export default function DisplayTab() {
                 <strong className="text-white">Operator:</strong> Dieser Bildschirm ({monitors[0]?.name || "Hauptmonitor"})
               </p>
               <p className="mt-1">
-                <strong className="text-white">Ausgabe:</strong> {monitors[outputMonitorIndex]?.name || `Monitor ${outputMonitorIndex + 1}`}
+                <strong className="text-white">Ausgabe:</strong> {outputMonitorIndices.map((idx) => monitors[idx]?.name || `Monitor ${idx + 1}`).join(", ")}
               </p>
             </div>
           </div>

@@ -2,7 +2,13 @@ import { create } from "zustand";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { sendToOutput, openOutputWindow, assignOutputToMonitor, closeOutputWindow as closeOutputFn } from "../lib/events";
+import { 
+  sendToOutput, 
+  openOutputWindowForMonitor, 
+  assignOutputWindowToMonitor, 
+  closeOutputWindowForMonitor,
+  closeAllOutputWindows as closeAllOutputFn,
+} from "../lib/events";
 import { secondsUntilTargetTime } from "../lib/formatTime";
 import { getSpotifyPlaylistId, resolveSpotifyClientId } from "../lib/spotify";
 import type {
@@ -614,11 +620,11 @@ interface Store {
 
   // ── Display ────────────────────────────────────────────────────────────
   monitors: Monitor[];
-  outputMonitorIndex: number | null;
-  outputWindowOpen: boolean;
+  outputMonitorIndices: number[]; // Array of monitor indices that have output windows open
+  outputWindowsOpen: Record<number, boolean>; // Map of monitor index -> window open state
   fetchMonitors: () => Promise<void>;
-  setOutputMonitor: (i: number | null) => Promise<void>;
-  closeOutputWindow: () => Promise<void>;
+  toggleOutputMonitor: (i: number) => Promise<void>;
+  closeAllOutputWindows: () => Promise<void>;
 
   // ── Show Mode ──────────────────────────────────────────────────────────
   showQueue: ShowItem[];
@@ -1795,20 +1801,28 @@ export const useStore = create<Store>((set, get) => ({
 
   // ── Display ──────────────────────────────────────────────────────────────
   monitors: [],
-  outputMonitorIndex: null,
-  outputWindowOpen: false,
+  outputMonitorIndices: [],
+  outputWindowsOpen: {},
 
   fetchMonitors: async () => {
     try {
       const monitors = await invoke<Monitor[]>("get_monitors");
       set({ monitors });
 
-      const configured = get().outputMonitorIndex;
-      if (configured !== null) {
-        if (configured >= 0 && configured < monitors.length) {
-          await get().setOutputMonitor(configured);
-        } else {
-          set({ outputMonitorIndex: null, outputWindowOpen: false });
+      // Restore output windows for previously configured monitors
+      const configuredIndices = get().outputMonitorIndices;
+      if (configuredIndices.length > 0) {
+        for (const idx of configuredIndices) {
+          if (idx >= 0 && idx < monitors.length) {
+            const m = monitors[idx];
+            try {
+              await openOutputWindowForMonitor(idx);
+              await assignOutputWindowToMonitor(idx, m.x, m.y, m.width, m.height);
+              set((s) => ({ outputWindowsOpen: { ...s.outputWindowsOpen, [idx]: true } }));
+            } catch (err) {
+              console.warn(`Failed to open output window for monitor ${idx}:`, err);
+            }
+          }
         }
       }
     } catch (err) {
@@ -1817,34 +1831,41 @@ export const useStore = create<Store>((set, get) => ({
     }
   },
 
-  setOutputMonitor: async (i) => {
-    set({ outputMonitorIndex: i });
-    if (i === null) {
-      await closeOutputFn();
-      set({ outputWindowOpen: false });
+  toggleOutputMonitor: async (i) => {
+    const currentIndices = get().outputMonitorIndices;
+    const isCurrentlyOpen = currentIndices.includes(i);
+
+    if (isCurrentlyOpen) {
+      // Close this output window
+      await closeOutputWindowForMonitor(i);
+      set((s) => ({
+        outputMonitorIndices: s.outputMonitorIndices.filter((idx) => idx !== i),
+        outputWindowsOpen: { ...s.outputWindowsOpen, [i]: false },
+      }));
     } else {
+      // Open output window on this monitor
       try {
         const m = get().monitors[i];
         if (m) {
-          await openOutputWindow();
-          await assignOutputToMonitor(m.x, m.y, m.width, m.height);
-          set({ outputWindowOpen: true, error: null });
+          await openOutputWindowForMonitor(i);
+          await assignOutputWindowToMonitor(i, m.x, m.y, m.width, m.height);
+          set((s) => ({
+            outputMonitorIndices: [...s.outputMonitorIndices, i],
+            outputWindowsOpen: { ...s.outputWindowsOpen, [i]: true },
+            error: null,
+          }));
         }
       } catch (err) {
-        console.error("Failed to set output monitor:", err);
+        console.error("Failed to open output window:", err);
         const msg = formatUnknownError(err);
         set({ error: `Ausgabefenster konnte nicht geöffnet werden: ${msg}` });
       }
     }
   },
 
-  closeOutputWindow: async () => {
-    try {
-      await closeOutputFn();
-    } catch (err) {
-      console.error("Failed to close output window:", err);
-    }
-    set({ outputWindowOpen: false });
+  closeAllOutputWindows: async () => {
+    await closeAllOutputFn();
+    set({ outputMonitorIndices: [], outputWindowsOpen: {} });
   },
 
   // ── Show Mode ──────────────────────────────────────────────────────────
@@ -1981,7 +2002,7 @@ export const useStore = create<Store>((set, get) => ({
           countdownBackgroundMusicFadeInStartMinutes: normalizeMinutes(parsed.countdownBackgroundMusicFadeInStartMinutes, 5),
           countdownBackgroundMusicFullVolumeMinutes: normalizeMinutes(parsed.countdownBackgroundMusicFullVolumeMinutes, 2),
           countdownDisplayAfterZeroSeconds: parsed.countdownDisplayAfterZeroSeconds ?? 10,
-          outputMonitorIndex: parsed.outputMonitorIndex ?? null,
+          outputMonitorIndices: parsed.outputMonitorIndices ?? [],
         });
       }
     } catch {
@@ -2004,7 +2025,7 @@ export const useStore = create<Store>((set, get) => ({
         countdownBackgroundMusicFadeInStartMinutes,
         countdownBackgroundMusicFullVolumeMinutes,
         countdownDisplayAfterZeroSeconds,
-        outputMonitorIndex,
+        outputMonitorIndices,
       } = get();
       localStorage.setItem(
         STORAGE_KEY,
@@ -2019,7 +2040,7 @@ export const useStore = create<Store>((set, get) => ({
           countdownBackgroundMusicFadeInStartMinutes,
           countdownBackgroundMusicFullVolumeMinutes,
           countdownDisplayAfterZeroSeconds,
-          outputMonitorIndex,
+          outputMonitorIndices,
         })
       );
     } catch {
@@ -2151,7 +2172,7 @@ useStore.subscribe((state, prevState) => {
     state.countdownLabel !== prevState.countdownLabel ||
     state.countdownTargetTime !== prevState.countdownTargetTime ||
     state.countdownTheme !== prevState.countdownTheme ||
-    state.outputMonitorIndex !== prevState.outputMonitorIndex ||
+    state.outputMonitorIndices !== prevState.outputMonitorIndices ||
     state.countdownBackgroundPlaylistId !== prevState.countdownBackgroundPlaylistId ||
     state.countdownBackgroundMusicVolume !== prevState.countdownBackgroundMusicVolume ||
     state.countdownBackgroundMusicStartMinutes !== prevState.countdownBackgroundMusicStartMinutes ||

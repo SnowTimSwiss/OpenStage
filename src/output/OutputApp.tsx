@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { OUTPUT_EVENT, VIDEO_CTRL_EVENT } from "../lib/events";
 import type { OutputPayload } from "../types";
 import OutputRenderer from "./OutputRenderer";
@@ -9,11 +10,29 @@ export default function OutputApp() {
   const [pendingState, setPendingState] = useState<OutputPayload | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [videoError, setVideoError] = useState(false);
+  const [monitorIndex, setMonitorIndex] = useState<number | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const transitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentModeRef = useRef<OutputPayload["mode"]>("blank");
   const transitioningRef = useRef(false);
   const TRANSITION_MS = 260;
+
+  useEffect(() => {
+    // Parse monitor index from URL
+    const params = new URLSearchParams(window.location.search);
+    const monitorParam = params.get("monitor");
+    const idx = monitorParam !== null ? parseInt(monitorParam, 10) : null;
+    if (!isNaN(idx!)) {
+      setMonitorIndex(idx);
+      // Update window title with monitor number
+      const windowLabel = `output-${idx}`;
+      WebviewWindow.getByLabel(windowLabel).then((w) => {
+        if (w) {
+          w.setTitle(`OpenStage — Output ${idx! + 1}`);
+        }
+      });
+    }
+  }, []);
 
   useEffect(() => {
     currentModeRef.current = state.mode;
