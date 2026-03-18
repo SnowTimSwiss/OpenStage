@@ -4,10 +4,6 @@
 
 Entwickelt für alle, die die Technik hinter der Bühne steuern – nicht nur für die Sprecher.
 
-![Version](https://img.shields.io/github/v/release/gesom/openstage?style=flat-square)
-![License](https://img.shields.io/github/license/gesom/openstage?style=flat-square)
-![Platform](https://img.shields.io/badge/platform-windows%20%7C%20macos%20%7C%20linux-lightgrey?style=flat-square)
-
 ---
 
 ## ✨ Features
@@ -42,7 +38,7 @@ Entwickelt für alle, die die Technik hinter der Bühne steuern – nicht nur f�
 ## 📥 Installation
 
 ### Downloads
-Lade die neueste Version von der [Releases-Seite](https://github.com/gesom/openstage/releases) herunter.
+Lade die neueste Version von der [Releases-Seite](https://github.com/snowtimswiss/openstage/releases) herunter.
 
 ### Windows
 | Datei | Beschreibung |
