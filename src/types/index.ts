@@ -34,7 +34,7 @@ export interface PdfGroup {
   pages: MediaItem[];
 }
 
-export type MusicSource = "local" | "spotify";
+export type MusicSource = "local";
 
 export interface MusicItem {
   id: string;
@@ -46,8 +46,6 @@ export interface MusicItem {
   album?: string;
   albumArt?: string;
   duration?: number;
-  spotifyId?: string;
-  spotifyUri?: string;
   playlistId?: string;
 }
 
@@ -57,18 +55,9 @@ export interface Playlist {
   description?: string;
   tracks: MusicItem[];
   source: MusicSource;
-  spotifyId?: string;
-  spotifyUri?: string;
   coverArt?: string;
   createdAt: number;
   updatedAt: number;
-}
-
-export interface SpotifyAuthState {
-  isAuthenticated: boolean;
-  accessToken: string | null;
-  refreshToken: string | null;
-  expiresAt: number | null;
 }
 
 export interface Monitor {

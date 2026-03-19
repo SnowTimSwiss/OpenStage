@@ -2,78 +2,21 @@ import { create } from "zustand";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { 
-  sendToOutput, 
-  openOutputWindowForMonitor, 
-  assignOutputWindowToMonitor, 
+import {
+  sendToOutput,
+  openOutputWindowForMonitor,
+  assignOutputWindowToMonitor,
   closeOutputWindowForMonitor,
   closeAllOutputWindows as closeAllOutputFn,
 } from "../lib/events";
 import { secondsUntilTargetTime } from "../lib/formatTime";
-import { getSpotifyPlaylistId, resolveSpotifyClientId } from "../lib/spotify";
 import type {
-  Song, MediaItem, MusicItem, Playlist, SpotifyAuthState, MusicSource,
+  Song, MediaItem, MusicItem, Playlist, MusicSource,
   Monitor, TabId, OutputMode, PdfGroup, CountdownTheme, ShowItem,
 } from "../types";
 
 const STORAGE_KEY = "openstage-settings-v1";
 const PLAYLISTS_KEY = "openstage-playlists-v1";
-const SPOTIFY_KEY = "openstage-spotify-v1";
-const SPOTIFY_REDIRECT_KEY = "openstage-spotify-redirect-uri-v1";
-
-// ── Spotify PKCE Helper Functions ─────────────────────────────────────────
-
-function generateRandomString(length: number): string {
-  const array = new Uint8Array(length);
-  crypto.getRandomValues(array);
-  return Array.from(array, (b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-async function generateCodeChallenge(codeVerifier: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(codeVerifier);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return btoa(String.fromCodePoint(...new Uint8Array(digest)))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
-
-async function exchangeCodeForToken(code: string): Promise<{ access_token: string; refresh_token: string; expires_in: number }> {
-  const clientId = resolveSpotifyClientId(import.meta.env.VITE_SPOTIFY_CLIENT_ID);
-  const storedRedirectUri = localStorage.getItem(SPOTIFY_REDIRECT_KEY) || "";
-  const redirectUri =
-    storedRedirectUri ||
-    import.meta.env.VITE_SPOTIFY_REDIRECT_URI ||
-    "http://localhost:5173/spotify-callback";
-  const codeVerifier = localStorage.getItem("spotify_code_verifier") || "";
-
-  if (!clientId || !codeVerifier) {
-    throw new Error("Spotify configuration missing");
-  }
-
-  // PKCE flow without client secret (secure for frontend apps)
-  const response = await fetch("https://accounts.spotify.com/api/token", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: redirectUri,
-      code_verifier: codeVerifier,
-      client_id: clientId,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(`Token exchange failed: ${response.status} - ${errorData.error_description || errorData.error || "Unknown error"}`);
-  }
-
-  return await response.json();
-}
 
 let countdownInterval: ReturnType<typeof setInterval> | null = null;
 let musicAudio: HTMLAudioElement | null = null;
@@ -88,14 +31,6 @@ let countdownBgStarting = false;
 let countdownBgStartOffsetSeconds = 0;
 let countdownEndTime: number | null = null;
 let countdownFadeOutTimeout: ReturnType<typeof setTimeout> | null = null;
-
-// Spotify auth state
-let spotifyAuth: SpotifyAuthState = {
-  isAuthenticated: false,
-  accessToken: null,
-  refreshToken: null,
-  expiresAt: null,
-};
 
 function formatUnknownError(err: unknown): string {
   if (err instanceof Error) return `${err.name}: ${err.message}`;
@@ -179,35 +114,35 @@ function getAudioDuration(src: string): Promise<number> {
   return new Promise((resolve, reject) => {
     const audio = new Audio();
     audio.preload = "metadata";
-    
+
     const cleanup = () => {
       audio.onloadedmetadata = null;
       audio.onerror = null;
     };
-    
+
     audio.onloadedmetadata = () => {
       cleanup();
       const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
       resolve(duration);
     };
-    
+
     audio.onerror = (err) => {
       cleanup();
       reject(new Error(`Failed to load audio metadata: ${err}`));
     };
-    
+
     audio.src = src;
   });
 }
 
 /**
  * Berechnet die aktuelle Lautstärke basierend auf der verbleibenden Zeit und den Fade-Einstellungen.
- * 
+ *
  * Logik:
  * - musicStartMinutes: X Minuten vor 00 startet die Musik mit startVolumePercent
  * - fadeInStartMinutes: Ab hier fängt die Musik an lauter zu werden
  * - fullVolumeMinutes: Ab hier ist die Musik auf 100%
- * 
+ *
  * @param remainingSeconds Verbleibende Sekunden bis 00
  */
 function calculateCountdownMusicVolume(remainingSeconds: number): number {
@@ -226,10 +161,10 @@ function calculateCountdownMusicVolume(remainingSeconds: number): number {
   const startSec = Math.max(0, countdownBackgroundMusicStartMinutes) * 60;
   const fadeInStartSec = Math.max(0, countdownBackgroundMusicFadeInStartMinutes) * 60;
   const fullSec = Math.max(0, countdownBackgroundMusicFullVolumeMinutes) * 60;
-  
+
   // Target volume (max volume, typically 1.0 = 100%)
   const targetVolume = normalizeVolume(countdownBackgroundMusicVolume, 1.0);
-  
+
   // Start volume as percentage (0-100% of targetVolume)
   const startVolumePercent = Math.max(0, Math.min(100, countdownBackgroundMusicStartVolumePercent)) / 100;
   const startVolume = startVolumePercent * targetVolume;
@@ -262,13 +197,7 @@ function calculateCountdownMusicVolume(remainingSeconds: number): number {
 function getEffectiveTrackDuration(track: MusicItem): number {
   const rawDuration = Number(track.duration || 0);
   if (!Number.isFinite(rawDuration) || rawDuration <= 0) {
-    return track.source === "spotify" && track.src ? 30 : 0;
-  }
-
-  // Spotify preview URLs are only ~30 seconds long, even though the API returns
-  // the full track duration. For countdown alignment we need the actual playable length.
-  if (track.source === "spotify" && track.src) {
-    return Math.min(rawDuration, 30);
+    return 0;
   }
 
   return rawDuration;
@@ -300,7 +229,7 @@ async function resolveCountdownQueueDurations(queue: MusicItem[]): Promise<Music
 
 /**
  * Berechnet die optimale Startposition in der Playlist, sodass das letzte Lied genau bei 00 endet.
- * 
+ *
  * @param remainingSeconds Verbleibende Sekunden bis 00
  * @param queue Playlist mit Liedern
  * @param startIndex Aktueller Index in der Playlist
@@ -351,7 +280,7 @@ function updateCountdownBgVolume(remainingSeconds: number) {
   const { outputMode, isBlackout } = useStore.getState();
   const shouldBeAudible = outputMode === "countdown" && !isBlackout;
   const desired = shouldBeAudible ? calculateCountdownMusicVolume(remainingSeconds) : 0;
-  
+
   if (Number.isFinite(desired)) {
     a.volume = desired;
   }
@@ -470,13 +399,13 @@ function ensureCountdownBgHandlers() {
   const a = ensureBackgroundMusicAudio();
   if (!a || countdownBgBound) return;
   countdownBgBound = true;
-  
+
   a.addEventListener("ended", () => {
     if (!countdownBgQueue.length) return;
     const { countdownRunning, countdownRemaining } = useStore.getState();
     const reachedEndTime = countdownEndTime !== null && Date.now() >= countdownEndTime - 150;
     if (!countdownRunning || countdownRemaining <= 0 || reachedEndTime) return;
-    
+
     // Move to next track in loop
     countdownBgIndex = (countdownBgIndex + 1) % countdownBgQueue.length;
     const next = countdownBgQueue[countdownBgIndex];
@@ -608,15 +537,6 @@ interface Store {
   removeTrackFromPlaylist: (playlistId: string, trackId: string) => void;
   setActivePlaylist: (id: string | null) => void;
   loadPlaylist: (playlistId: string) => void;
-  importSpotifyPlaylist: (playlistUri: string) => Promise<void>;
-
-  // ── Spotify ────────────────────────────────────────────────────────────
-  spotifyAuth: SpotifyAuthState;
-  setSpotifyAuth: (auth: SpotifyAuthState) => void;
-  exchangeSpotifyCode: (code: string) => Promise<void>;
-  connectSpotify: () => Promise<void>;
-  disconnectSpotify: () => void;
-  fetchSpotifyPlaylists: () => Promise<any[]>;
 
   // ── Display ────────────────────────────────────────────────────────────
   monitors: Monitor[];
@@ -816,7 +736,7 @@ export const useStore = create<Store>((set, get) => ({
 
         const raw = await readFile(filePath);
         const bytes = raw instanceof Uint8Array ? raw : new Uint8Array(raw as ArrayLike<number>);
-        
+
         const loadingTask = pdfjsLib.getDocument({ data: bytes });
         const pdf = await loadingTask.promise;
 
@@ -1001,10 +921,10 @@ export const useStore = create<Store>((set, get) => ({
   setCountdownDisplayAfterZeroSeconds: (s) => set({ countdownDisplayAfterZeroSeconds: Math.max(0, Math.min(60, s)) }),
 
   startCountdown: () => {
-    const { 
-      countdownTargetTime, 
-      countdownBackgroundPlaylistId, 
-      playlists, 
+    const {
+      countdownTargetTime,
+      countdownBackgroundPlaylistId,
+      playlists,
     } = get();
 
     clearCountdownFadeOutTimeout();
@@ -1014,7 +934,7 @@ export const useStore = create<Store>((set, get) => ({
       const playlist = playlists.find((p) => p.id === countdownBackgroundPlaylistId);
       const tracks = playlist?.tracks ?? [];
       const playable = tracks.filter((t) => typeof t.src === "string" && t.src.trim());
-      
+
       if (playlist && playable.length > 0) {
         const a = ensureBackgroundMusicAudio();
         if (a) {
@@ -1043,10 +963,10 @@ export const useStore = create<Store>((set, get) => ({
     }
 
     set({ countdownRunning: true });
-    
+
     countdownEndTime = Date.now() + (get().countdownRemaining * 1000);
     sendCurrentCountdownToOutput({ running: true });
-    
+
     countdownInterval = setInterval(() => {
       const { stopCountdown } = get();
       const next = Math.max(0, Math.ceil(((countdownEndTime ?? Date.now()) - Date.now()) / 1000));
@@ -1054,9 +974,9 @@ export const useStore = create<Store>((set, get) => ({
       set({ countdownRemaining: next });
       maybeStartCountdownBackgroundMusic(next);
       updateCountdownBgVolume(next);
-      
+
       sendCurrentCountdownToOutput({ remaining: next, running: true });
-      
+
       if (next <= 0) {
         stopCountdown();
       }
@@ -1064,20 +984,20 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   stopCountdown: () => {
-    if (countdownInterval) { 
-      clearInterval(countdownInterval); 
-      countdownInterval = null; 
+    if (countdownInterval) {
+      clearInterval(countdownInterval);
+      countdownInterval = null;
     }
-    
+
     const { countdownRemaining, countdownLabel, countdownTheme, countdownTargetTime, countdownDisplayAfterZeroSeconds } = get();
-    
+
     set({ countdownRunning: false });
 
     // Manual stop before 0 should also stop the countdown background music.
     if (countdownRemaining > 0) {
       stopCountdownBackgroundMusic();
     }
-    
+
     // If countdown reached 0, keep display visible for configured seconds, then fade to black.
     // This only affects output when countdown is currently the active output mode.
     if (countdownRemaining <= 0 && isCountdownOutputActive()) {
@@ -1088,7 +1008,7 @@ export const useStore = create<Store>((set, get) => ({
         theme: countdownTheme,
         targetTime: countdownTargetTime,
       });
-      
+
       // After displayAfterZeroSeconds, fade out to black
       clearCountdownFadeOutTimeout();
 
@@ -1108,10 +1028,10 @@ export const useStore = create<Store>((set, get) => ({
           countdownFadeOutTimeout = null;
         }, 1200);
       }, countdownDisplayAfterZeroSeconds * 1000);
-      
+
       return;
     }
-    
+
     // Countdown was stopped manually (not at 0)
     sendCurrentCountdownToOutput({
       remaining: countdownRemaining,
@@ -1123,16 +1043,16 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   resetCountdown: () => {
-    if (countdownInterval) { 
-      clearInterval(countdownInterval); 
-      countdownInterval = null; 
+    if (countdownInterval) {
+      clearInterval(countdownInterval);
+      countdownInterval = null;
     }
-    
+
     // Stop background music
     stopCountdownBackgroundMusic();
-    
+
     clearCountdownFadeOutTimeout();
-    
+
     const t = get().countdownTargetTime;
     let diffSeconds = 0;
     if (t) {
@@ -1223,13 +1143,13 @@ export const useStore = create<Store>((set, get) => ({
       });
       if (!files) return;
       const arr = Array.isArray(files) ? files : [files];
-      
+
       // Load files and get duration
       const items: MusicItem[] = await Promise.all(arr.map(async (f) => {
         const path = f as string;
         const name = path.split(/[\\/]/).pop() ?? f as string;
         const src = convertFileSrc(path);
-        
+
         // Get duration by loading audio metadata
         let duration: number | undefined;
         try {
@@ -1237,7 +1157,7 @@ export const useStore = create<Store>((set, get) => ({
         } catch (err) {
           console.warn(`Could not get duration for ${name}:`, err);
         }
-        
+
         return {
           id: crypto.randomUUID(),
           name,
@@ -1247,7 +1167,7 @@ export const useStore = create<Store>((set, get) => ({
           duration,
         };
       }));
-      
+
       set((s) => ({ music: [...s.music, ...items] }));
 
       // Add to playlist if specified
@@ -1291,7 +1211,7 @@ export const useStore = create<Store>((set, get) => ({
       const items: MusicItem[] = await Promise.all(audioFiles.map(async (entry) => {
         const fullPath = `${folder}/${entry.name}`;
         const src = convertFileSrc(fullPath);
-        
+
         // Get duration by loading audio metadata
         let duration: number | undefined;
         try {
@@ -1299,7 +1219,7 @@ export const useStore = create<Store>((set, get) => ({
         } catch (err) {
           console.warn(`Could not get duration for ${entry.name}:`, err);
         }
-        
+
         return {
           id: crypto.randomUUID(),
           name: entry.name,
@@ -1354,22 +1274,22 @@ export const useStore = create<Store>((set, get) => ({
     }
   },
 
-	  setMusicIndex: (i) => set({ musicIndex: i }),
-	  setMusicPlaying: (p) => {
-	    const fadeDuration = get().musicFadeDuration;
-	    const a = ensureMusicAudio();
-	    if (!a) return;
+  setMusicIndex: (i) => set({ musicIndex: i }),
+  setMusicPlaying: (p) => {
+    const fadeDuration = get().musicFadeDuration;
+    const a = ensureMusicAudio();
+    if (!a) return;
 
-	    if (p) {
-	      const current = get().music[get().musicIndex];
-	      if (!current?.src) {
-	        set({ error: "Dieser Track kann nicht abgespielt werden (keine Audio-Quelle).", musicPlaying: false });
-	        return;
-	      }
-	      // Fade in
-	      a.volume = 0;
-	      a.play().catch(() => {});
-	      set({ musicPlaying: true });
+    if (p) {
+      const current = get().music[get().musicIndex];
+      if (!current?.src) {
+        set({ error: "Dieser Track kann nicht abgespielt werden (keine Audio-Quelle).", musicPlaying: false });
+        return;
+      }
+      // Fade in
+      a.volume = 0;
+      a.play().catch(() => {});
+      set({ musicPlaying: true });
 
       // Fade in over fadeDuration seconds
       const fadeSteps = 20;
@@ -1412,31 +1332,31 @@ export const useStore = create<Store>((set, get) => ({
 
   toggleMusicPlaying: () => get().setMusicPlaying(!get().musicPlaying),
 
-	  playNextMusic: () => {
-	    const { music, musicIndex, setMusicIndex, setMusicPlaying } = get();
-	    if (music.length === 0) return;
-	    let next = musicIndex;
-	    for (let i = 0; i < music.length; i++) {
-	      next = (next + 1) % music.length;
-	      if (music[next]?.src) break;
-	    }
-	    setMusicIndex(next);
-	    set({ musicCurrentTime: 0 });
-	    setMusicPlaying(true);
-	  },
+  playNextMusic: () => {
+    const { music, musicIndex, setMusicIndex, setMusicPlaying } = get();
+    if (music.length === 0) return;
+    let next = musicIndex;
+    for (let i = 0; i < music.length; i++) {
+      next = (next + 1) % music.length;
+      if (music[next]?.src) break;
+    }
+    setMusicIndex(next);
+    set({ musicCurrentTime: 0 });
+    setMusicPlaying(true);
+  },
 
-	  playPrevMusic: () => {
-	    const { music, musicIndex, setMusicIndex, setMusicPlaying } = get();
-	    if (music.length === 0) return;
-	    let prev = musicIndex;
-	    for (let i = 0; i < music.length; i++) {
-	      prev = (prev - 1 + music.length) % music.length;
-	      if (music[prev]?.src) break;
-	    }
-	    setMusicIndex(prev);
-	    set({ musicCurrentTime: 0 });
-	    setMusicPlaying(true);
-	  },
+  playPrevMusic: () => {
+    const { music, musicIndex, setMusicIndex, setMusicPlaying } = get();
+    if (music.length === 0) return;
+    let prev = musicIndex;
+    for (let i = 0; i < music.length; i++) {
+      prev = (prev - 1 + music.length) % music.length;
+      if (music[prev]?.src) break;
+    }
+    setMusicIndex(prev);
+    set({ musicCurrentTime: 0 });
+    setMusicPlaying(true);
+  },
 
   seekMusic: (time) => {
     const a = ensureMusicAudio();
@@ -1566,236 +1486,6 @@ export const useStore = create<Store>((set, get) => ({
     const playlist = get().playlists.find((p) => p.id === playlistId);
     if (playlist) {
       set({ music: playlist.tracks, musicIndex: 0, musicPlaying: false, activePlaylistId: playlistId });
-    }
-  },
-
-	  importSpotifyPlaylist: async (playlistUri) => {
-	    try {
-	      const { spotifyAuth } = get();
-
-	      // Parse playlist ID from URI (spotify:playlist:xxxxx or URL)
-	      const raw = String(playlistUri || "").trim();
-	      if (!raw) throw new Error("Bitte einen Spotify Playlist-Link oder eine URI eingeben.");
-	      const playlistId = getSpotifyPlaylistId(raw);
-
-	      if (!spotifyAuth.isAuthenticated || !spotifyAuth.accessToken) throw new Error("Spotify nicht verbunden");
-
-	      if (!playlistId) {
-	        throw new Error("Konnte Playlist-ID nicht aus dem Link/der URI lesen. Bitte einen open.spotify.com/playlist/... Link oder spotify:playlist:... verwenden.");
-	      }
-
-	      const response = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}`, {
-	        headers: {
-	          Authorization: `Bearer ${spotifyAuth.accessToken}`,
-	        },
-	      });
-
-      if (!response.ok) {
-        throw new Error(`Spotify API Error: ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      const newPlaylist: Playlist = {
-        id: crypto.randomUUID(),
-        name: data.name,
-        description: data.description || "",
-        tracks: [],
-        source: "spotify",
-        spotifyId: data.id,
-        spotifyUri: data.uri,
-        coverArt: data.images?.[0]?.url,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-
-      // Fetch tracks (handle case where data.tracks might be undefined)
-      if (data.tracks?.href) {
-        const tracksResponse = await fetch(data.tracks.href, {
-          headers: {
-            Authorization: `Bearer ${spotifyAuth.accessToken}`,
-          },
-        });
-
-        if (tracksResponse.ok) {
-          const tracksData = await tracksResponse.json();
-          newPlaylist.tracks = tracksData.items
-            .filter((item: any) => item.track && item.track.id)
-            .map((item: any) => {
-              const track = item.track;
-              return {
-                id: crypto.randomUUID(),
-                name: `${track.name} - ${track.artists?.[0]?.name || "Unknown"}`,
-                path: "",
-                src: track.preview_url || "",
-                source: "spotify" as MusicSource,
-                artist: track.artists?.[0]?.name,
-                album: track.album?.name,
-                albumArt: track.album?.images?.[0]?.url,
-                duration: track.duration_ms / 1000,
-                spotifyId: track.id,
-                spotifyUri: track.uri,
-                playlistId: newPlaylist.id,
-              } as MusicItem;
-            });
-        }
-      }
-
-      set((s) => ({ playlists: [...s.playlists, newPlaylist] }));
-      savePlaylists();
-    } catch (err) {
-      console.error("Failed to import Spotify playlist:", err);
-      throw err;
-    }
-  },
-
-  // ── Spotify ────────────────────────────────────────────────────────────
-  spotifyAuth: {
-    isAuthenticated: false,
-    accessToken: null,
-    refreshToken: null,
-    expiresAt: null,
-  },
-  setSpotifyAuth: (auth: SpotifyAuthState) => {
-    spotifyAuth = auth;
-    set({ spotifyAuth });
-    saveSpotifyAuth();
-  },
-  exchangeSpotifyCode: async (code: string) => {
-    try {
-      const tokens = await exchangeCodeForToken(code);
-      spotifyAuth = {
-        isAuthenticated: true,
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
-        expiresAt: Date.now() + tokens.expires_in * 1000,
-      };
-      set({ spotifyAuth });
-      saveSpotifyAuth();
-      localStorage.removeItem("spotify_code_verifier");
-    } catch (err) {
-      console.error("Failed to exchange Spotify code:", err);
-      throw err;
-    }
-  },
-
-  connectSpotify: async () => {
-    // Spotify OAuth2 PKCE configuration (no client secret needed for PKCE)
-	    const clientId = resolveSpotifyClientId(import.meta.env.VITE_SPOTIFY_CLIENT_ID);
-    const scopes = "playlist-read-private playlist-read-collaborative user-read-email user-library-read";
-
-	    if (!clientId) {
-	      set({ error: "Spotify Client ID nicht konfiguriert. Bitte VITE_SPOTIFY_CLIENT_ID in .env setzen.", isLoading: false });
-	      throw new Error("Spotify Client ID nicht konfiguriert. Bitte VITE_SPOTIFY_CLIENT_ID in .env setzen.");
-	    }
-
-	    set({ isLoading: true, error: null });
-	    try {
-	
-	    // For PKCE flow, we generate a code verifier and challenge
-	    const codeVerifier = generateRandomString(64);
-	    const codeChallenge = await generateCodeChallenge(codeVerifier);
-
-    // Store verifier for later
-    localStorage.setItem("spotify_code_verifier", codeVerifier);
-
-    // Start local auth server to receive callback
-    const { listen } = await import("@tauri-apps/api/event");
-    
-    // Use a fixed port by default (Spotify redirect URIs must match exactly)
-    const port = Number(import.meta.env.VITE_SPOTIFY_AUTH_PORT) || 8080;
-    
-    try {
-      const redirectUri = await invoke<string>("start_spotify_auth_server", { port });
-      localStorage.setItem(SPOTIFY_REDIRECT_KEY, redirectUri);
-      
-      // Listen for auth callback event
-      const unlisten = await listen<string>("spotify-auth-callback", (event) => {
-        const code = event.payload;
-        console.log("Received Spotify auth code:", code);
-        
-        // Auto-exchange the code
-        get().exchangeSpotifyCode(code).catch((err) => {
-          console.error("Auto-exchange failed:", err);
-          set({ error: `Spotify Verbindung fehlgeschlagen: ${formatUnknownError(err)}` });
-        });
-        
-        // Cleanup
-        unlisten();
-      });
-
-      // Open Spotify authorization page in external browser
-      const authUrl = `https://accounts.spotify.com/authorize?client_id=${clientId}&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scopes)}&code_challenge_method=S256&code_challenge=${codeChallenge}`;
-
-      try {
-        const { openUrl } = await import("@tauri-apps/plugin-opener");
-        await openUrl(authUrl);
-      } catch (openErr) {
-        // Fallback for web / missing plugin: at least try to open a new tab.
-        if (typeof window !== "undefined") {
-          window.open(authUrl, "_blank", "noopener,noreferrer");
-        } else {
-          throw openErr;
-        }
-      }
-
-      set({
-        isLoading: false,
-        error: "Spotify Autorisierung im Browser geöffnet. Nach der Anmeldung wirst du automatisch verbunden.",
-      });
-	    } catch (err) {
-	      console.error("Failed to start Spotify auth:", err);
-	      set({
-	        error: `Spotify Verbindung fehlgeschlagen: ${formatUnknownError(err)}`,
-	        isLoading: false,
-	      });
-	      throw err;
-	    }
-	    } catch (err) {
-	      console.error("connectSpotify failed:", err);
-	      set({
-	        error: `Spotify Verbindung fehlgeschlagen: ${formatUnknownError(err)}`,
-	        isLoading: false,
-	      });
-	      throw err;
-	    }
-	  },
-
-  disconnectSpotify: () => {
-    spotifyAuth = {
-      isAuthenticated: false,
-      accessToken: null,
-      refreshToken: null,
-      expiresAt: null,
-    };
-    set({ spotifyAuth });
-    localStorage.removeItem(SPOTIFY_KEY);
-    localStorage.removeItem(SPOTIFY_REDIRECT_KEY);
-    localStorage.removeItem("spotify_code_verifier");
-  },
-
-  fetchSpotifyPlaylists: async () => {
-    const { spotifyAuth } = get();
-    if (!spotifyAuth.isAuthenticated || !spotifyAuth.accessToken) {
-      return [];
-    }
-
-    try {
-      const response = await fetch("https://api.spotify.com/v1/me/playlists", {
-        headers: {
-          Authorization: `Bearer ${spotifyAuth.accessToken}`,
-        },
-      });
-
-      if (!response.ok) {
-        return [];
-      }
-
-      const data = await response.json();
-      return data.items || [];
-    } catch (err) {
-      console.error("Failed to fetch Spotify playlists:", err);
-      return [];
     }
   },
 
@@ -2009,7 +1699,6 @@ export const useStore = create<Store>((set, get) => ({
       console.warn("Could not load settings");
     }
     loadPlaylists();
-    loadSpotifyAuth();
   },
 
   saveSettings: () => {
@@ -2049,12 +1738,12 @@ export const useStore = create<Store>((set, get) => ({
   },
 }));
 
-// ── Playlist & Spotify Persistence ────────────────────────────────────────
+// ── Playlist Persistence ────────────────────────────────────────
 
 function savePlaylists() {
   try {
     const { playlists } = useStore.getState();
-    // Persist track lists so playlists can be played back (including Spotify preview URLs).
+    // Persist track lists so playlists can be played back.
     const toPersist = playlists;
     localStorage.setItem(PLAYLISTS_KEY, JSON.stringify(toPersist));
   } catch {
@@ -2076,32 +1765,6 @@ function loadPlaylists() {
     }
   } catch {
     console.warn("Could not load playlists");
-  }
-}
-
-function saveSpotifyAuth() {
-  try {
-    localStorage.setItem(SPOTIFY_KEY, JSON.stringify(spotifyAuth));
-  } catch {
-    console.warn("Could not save Spotify auth");
-  }
-}
-
-function loadSpotifyAuth() {
-  try {
-    const saved = localStorage.getItem(SPOTIFY_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      spotifyAuth = {
-        isAuthenticated: parsed.isAuthenticated ?? false,
-        accessToken: parsed.accessToken ?? null,
-        refreshToken: parsed.refreshToken ?? null,
-        expiresAt: parsed.expiresAt ?? null,
-      };
-      useStore.setState({ spotifyAuth });
-    }
-  } catch {
-    console.warn("Could not load Spotify auth");
   }
 }
 

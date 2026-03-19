@@ -49,7 +49,7 @@ export default function CountdownTab() {
   const backgroundPlaylistArt = backgroundPlaylist?.coverArt ?? backgroundPlaylist?.tracks[0]?.albumArt ?? null;
   const playlistOptions = playlists.map((p) => ({
     id: p.id,
-    title: `${p.source === "spotify" ? "Spotify" : "Local"}: ${p.name} (${p.tracks.length})`,
+    title: `${p.name} (${p.tracks.length})`,
     artist: "",
   }));
 
@@ -348,9 +348,7 @@ export default function CountdownTab() {
                     </div>
                     <div className="text-[11px] mt-0.5" style={{ color: "#666" }}>
                       {backgroundPlaylist
-                        ? `${backgroundPlaylist.tracks.length} Tracks · ${
-                            backgroundPlaylist.source === "spotify" ? "Spotify" : "Lokal"
-                          }`
+                        ? `${backgroundPlaylist.tracks.length} Tracks · Lokal`
                         : "Nur Vorschau, hier kann nichts geändert werden"}
                     </div>
                   </div>
