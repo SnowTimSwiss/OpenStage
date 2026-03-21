@@ -4,17 +4,28 @@ import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
 import type { OutputPayload } from "../types";
 
 export const OUTPUT_EVENT = "openstage:output";
+export const OUTPUT_READY_EVENT = "openstage:output-ready";
 export const VIDEO_CTRL_EVENT = "openstage:video-ctrl";
 
 let outputWindowOpening: Promise<WebviewWindow> | null = null;
+let lastOutputPayload: OutputPayload = { mode: "blank" };
 
 /** Broadcast a state update to all output windows */
 export async function sendToOutput(payload: OutputPayload) {
   try {
+    lastOutputPayload = payload;
+    console.log("[sendToOutput] Sending payload:", payload);
+
+    // Emit to all listeners (this is the main way)
     await emit(OUTPUT_EVENT, payload);
   } catch (err) {
     console.warn("Failed to send to output:", err);
   }
+}
+
+/** Get the most recently broadcast output payload */
+export function getLastOutputPayload(): OutputPayload {
+  return lastOutputPayload;
 }
 
 /** Send video control: play | pause to all output windows */

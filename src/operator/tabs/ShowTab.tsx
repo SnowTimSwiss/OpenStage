@@ -4,11 +4,20 @@ import { sendToOutput } from "../../lib/events";
 import OutputRenderer from "../../output/OutputRenderer";
 import type { OutputPayload, ShowItem } from "../../types";
 
+function formatTime(s: number) {
+  if (!Number.isFinite(s) || s < 0) return "00:00";
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+}
+
 export default function ShowTab() {
   const slides = useStore((s) => s.slides);
   const videos = useStore((s) => s.videos);
   const songs = useStore((s) => s.songs);
   const pdfGroups = useStore((s) => s.pdfGroups);
+  const music = useStore((s) => s.music);
+  const playlists = useStore((s) => s.playlists);
   const countdownRemaining = useStore((s) => s.countdownRemaining);
   const countdownLabel = useStore((s) => s.countdownLabel);
   const countdownTheme = useStore((s) => s.countdownTheme);
@@ -21,6 +30,18 @@ export default function ShowTab() {
   const showNextSlide = useStore((s) => s.showNextSlide);
   const showPreviousSlide = useStore((s) => s.showPreviousSlide);
   const reorderShowQueue = useStore((s) => s.reorderShowQueue);
+
+  // Music controls for show mode
+  const musicIndex = useStore((s) => s.musicIndex);
+  const musicPlaying = useStore((s) => s.musicPlaying);
+  const musicCurrentTime = useStore((s) => s.musicCurrentTime);
+  const musicDuration = useStore((s) => s.musicDuration);
+  const musicVolume = useStore((s) => s.musicVolume);
+  const setMusicPlaying = useStore((s) => s.setMusicPlaying);
+  const playNextMusic = useStore((s) => s.playNextMusic);
+  const playPrevMusic = useStore((s) => s.playPrevMusic);
+  const seekMusic = useStore((s) => s.seekMusic);
+  const setMusicVolume = useStore((s) => s.setMusicVolume);
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const previewVideoRef = useRef<HTMLVideoElement>(null);
@@ -48,10 +69,15 @@ export default function ShowTab() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [showNextSlide, showPreviousSlide]);
 
-  useEffect(() => {
-    if (showCurrentIndex < 0 || showCurrentIndex >= showQueue.length) return;
+  const currentItem = showCurrentIndex >= 0 && showCurrentIndex < showQueue.length ? showQueue[showCurrentIndex] : null;
+
+  // Compute output payload for current show item
+  const outputPayload = useMemo<OutputPayload>(() => {
+    if (showCurrentIndex < 0 || showCurrentIndex >= showQueue.length) {
+      return { mode: "blank" };
+    }
     const item = showQueue[showCurrentIndex];
-    const payload = buildOutputPayload(item, {
+    return buildOutputPayload(item, {
       slides,
       videos,
       songs,
@@ -59,53 +85,61 @@ export default function ShowTab() {
       countdownRemaining,
       countdownLabel,
       countdownTheme,
+      music,
+      playlists,
     });
+  }, [showCurrentIndex, showQueue, slides, videos, songs, pdfGroups, countdownRemaining, countdownLabel, countdownTheme, music, playlists]);
+
+  // Send payload to output when it changes
+  useEffect(() => {
     const current = useStore.getState();
-    if (current.outputMode !== payload.mode || current.isBlackout) {
-      useStore.setState({ outputMode: payload.mode, isBlackout: false });
+    if (current.outputMode !== outputPayload.mode || current.isBlackout) {
+      useStore.setState({ outputMode: outputPayload.mode, isBlackout: false });
     }
-    sendToOutput(payload);
-  }, [
-    showCurrentIndex,
-    showQueue,
-    slides,
-    videos,
-    songs,
-    pdfGroups,
-    countdownRemaining,
-    countdownLabel,
-    countdownTheme,
-  ]);
+    console.log("[ShowTab] Sending to output:", outputPayload);
+    sendToOutput(outputPayload).catch((err) => {
+      console.error("[ShowTab] Failed to send to output:", err);
+    });
+  }, [outputPayload]);
 
-  const currentItem = showCurrentIndex >= 0 && showCurrentIndex < showQueue.length ? showQueue[showCurrentIndex] : null;
+  const previewPayload = useMemo<OutputPayload>(() => {
+    return currentItem
+      ? buildOutputPayload(currentItem, {
+          slides,
+          videos,
+          songs,
+          pdfGroups,
+          countdownRemaining,
+          countdownLabel,
+          countdownTheme,
+          music,
+          playlists,
+        })
+      : { mode: "blank" };
+  }, [currentItem, slides, videos, songs, pdfGroups, countdownRemaining, countdownLabel, countdownTheme, music, playlists]);
 
-  const previewPayload = useMemo(
-    () =>
-      currentItem
-        ? buildOutputPayload(currentItem, {
-            slides,
-            videos,
-            songs,
-            pdfGroups,
-            countdownRemaining,
-            countdownLabel,
-            countdownTheme,
-          })
-        : { mode: "blank" as const },
-    [currentItem, slides, videos, songs, pdfGroups, countdownRemaining, countdownLabel, countdownTheme]
-  );
-
-  function handleAddItem(type: ShowItem["type"], refId?: string) {
-    const label = getItemLabel(type, refId, slides, videos, songs, pdfGroups);
+  function handleAddItem(type: ShowItem["type"], refId?: string, extra?: { musicTrackId?: string; playlistId?: string }) {
+    const label = getItemLabel(type, refId, slides, videos, songs, pdfGroups, music, playlists);
     const item: ShowItem = {
       id: crypto.randomUUID(),
       type,
       refId,
       label,
       slideIndex: type === "song" || type === "pdf" ? 0 : undefined,
+      musicTrackId: extra?.musicTrackId,
+      playlistId: extra?.playlistId,
+      showMusicOverlay: true, // default: show title/artist
     };
     addToShowQueue(item);
     setIsAddModalOpen(false);
+  }
+
+  function toggleShowMusicOverlay(itemId: string) {
+    useStore.setState((s) => ({
+      showQueue: s.showQueue.map((item) =>
+        item.id === itemId ? { ...item, showMusicOverlay: !item.showMusicOverlay } : item
+      ),
+    }));
   }
 
   function handleItemClick(index: number) {
@@ -221,6 +255,22 @@ export default function ShowTab() {
                                 {currentSlide}/{totalSlides}
                               </span>
                             )}
+                            {(item.type === "music" || item.type === "playlist") && (
+                              <span
+                                className={`text-[9px] px-1 rounded cursor-pointer transition-colors ${
+                                  item.showMusicOverlay !== false
+                                    ? "bg-[#f9731620] text-[#f97316]"
+                                    : "bg-[#222] text-gray-500"
+                                }`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleShowMusicOverlay(item.id);
+                                }}
+                                title={item.showMusicOverlay !== false ? "Overlay anzeige: Titel & Künstler" : "Overlay aus: Blackscreen"}
+                              >
+                                {item.showMusicOverlay !== false ? "👁" : "🚫"}
+                              </span>
+                            )}
                           </div>
                         </div>
 
@@ -278,46 +328,142 @@ export default function ShowTab() {
           </div>
 
           {showQueue.length > 0 && (
-            <div className="px-3 py-2 border-t flex items-center gap-2" style={{ borderColor: "#1a1a1a" }}>
-              <button
-                onClick={showPreviousSlide}
-                className="flex-1 text-xs py-1.5 rounded-lg transition-all"
-                style={{ background: "#222", color: "#ccc", border: "1px solid #333" }}
-              >
-                ← Prev
-              </button>
-              <button
-                onClick={showNextSlide}
-                className="flex-1 text-xs py-1.5 rounded-lg transition-all"
-                style={{ background: "#f97316", color: "white", border: "1px solid #f97316" }}
-              >
-                Next →
-              </button>
+            <div className="px-3 py-2 border-t flex flex-col gap-2" style={{ borderColor: "#1a1a1a" }}>
+              {/* Navigation Buttons */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={showPreviousSlide}
+                  className="flex-1 text-xs py-1.5 rounded-lg transition-all"
+                  style={{ background: "#222", color: "#ccc", border: "1px solid #333" }}
+                >
+                  ← Prev
+                </button>
+                <button
+                  onClick={showNextSlide}
+                  className="flex-1 text-xs py-1.5 rounded-lg transition-all"
+                  style={{ background: "#f97316", color: "white", border: "1px solid #f97316" }}
+                >
+                  Next →
+                </button>
+              </div>
+
+              {/* Music Controls (when music item is active) */}
+              {currentItem && (currentItem.type === "music" || currentItem.type === "playlist") && (
+                <div className="flex items-center gap-2 pt-2 border-t" style={{ borderColor: "#252525" }}>
+                  <button
+                    onClick={playPrevMusic}
+                    className="w-8 h-8 rounded-lg flex items-center justify-center text-xs"
+                    style={{ background: "#1a1a1a", color: "#aaa", border: "1px solid #333" }}
+                    title="Vorheriger Track"
+                  >
+                    ⏮
+                  </button>
+                  <button
+                    onClick={() => setMusicPlaying(!musicPlaying)}
+                    className="w-10 h-10 rounded-lg flex items-center justify-center font-bold text-sm"
+                    style={{
+                      background: musicPlaying ? "#f97316" : "#1a1a1a",
+                      color: musicPlaying ? "white" : "#aaa",
+                      border: musicPlaying ? "1px solid #f97316" : "1px solid #333",
+                      boxShadow: musicPlaying ? "0 0 12px #f9731640" : "none",
+                    }}
+                    title={musicPlaying ? "Pause" : "Play"}
+                  >
+                    {musicPlaying ? "⏸" : "▶"}
+                  </button>
+                  <button
+                    onClick={playNextMusic}
+                    className="w-8 h-8 rounded-lg flex items-center justify-center text-xs"
+                    style={{ background: "#1a1a1a", color: "#aaa", border: "1px solid #333" }}
+                    title="Nächster Track"
+                  >
+                    ⏭
+                  </button>
+
+                  {/* Progress Bar */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between text-[9px] font-mono mb-0.5" style={{ color: "#666" }}>
+                      <span>{formatTime(musicCurrentTime)}</span>
+                      <span>{formatTime(musicDuration)}</span>
+                    </div>
+                    <div className="relative h-1.5 rounded-full" style={{ background: "#1a1a1a" }}>
+                      <div
+                        className="absolute left-0 top-0 h-full rounded-full"
+                        style={{ width: `${musicDuration > 0 ? (musicCurrentTime / musicDuration) * 100 : 0}%`, background: "#f97316" }}
+                      />
+                      <input
+                        type="range"
+                        min={0}
+                        max={Math.max(1, musicDuration)}
+                        step={0.25}
+                        value={musicCurrentTime}
+                        onChange={(e) => seekMusic(Number(e.target.value))}
+                        className="absolute inset-0 w-full opacity-0 cursor-pointer"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Volume */}
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px]" style={{ color: "#666" }}>🔊</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={musicVolume}
+                      onChange={(e) => setMusicVolume(Number(e.target.value))}
+                      className="w-16 h-1"
+                      style={{
+                        background: `linear-gradient(to right, #f97316 0%, #f97316 ${musicVolume * 100}%, #1a1a1a ${musicVolume * 100}%, #1a1a1a 100%)`,
+                        borderRadius: "2px",
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
 
-        <div className="flex-1 flex flex-col">
-          <div className="px-3 py-2 border-b" style={{ borderColor: "#1a1a1a" }}>
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="px-3 py-2 border-b flex items-center justify-between" style={{ borderColor: "#1a1a1a" }}>
             <span className="text-[10px] uppercase tracking-widest font-medium" style={{ color: "#555" }}>
               Preview
             </span>
+            {(currentItem?.type === "song" || currentItem?.type === "pdf") && (
+              <span className="text-[10px]" style={{ color: "#666" }}>
+                {(currentItem.slideIndex ?? 0) + 1} / {getTotalSlides(currentItem)} Folien
+              </span>
+            )}
           </div>
 
-          <div className="flex-1 flex items-center justify-center p-4">
+          <div className="flex-1 overflow-y-auto p-4">
             {currentItem ? (
-              <div className="w-full h-full max-h-[500px] aspect-video bg-[#0a0a0a] rounded-lg border border-[#1e1e1e] overflow-hidden relative">
-                <OutputRenderer state={previewPayload} embedded muteVideo videoRef={previewVideoRef} />
+              <div className="space-y-4">
+                {/* Main Preview */}
+                <div className="w-full aspect-video bg-[#0a0a0a] rounded-lg border border-[#1e1e1e] overflow-hidden relative">
+                  <OutputRenderer state={previewPayload} embedded muteVideo videoRef={previewVideoRef} />
+                </div>
+
+                {/* Slide Grid for Songs and PDFs */}
                 {(currentItem.type === "song" || currentItem.type === "pdf") && (
-                  <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2">
-                    <span className="text-[10px] px-2 py-1 rounded" style={{ background: "#222", color: "#888" }}>
-                      Slide {(currentItem.slideIndex ?? 0) + 1} / {getTotalSlides(currentItem)}
-                    </span>
-                  </div>
+                  <SlideGrid
+                    item={currentItem}
+                    songs={songs}
+                    pdfGroups={pdfGroups}
+                    onSelectSlide={(index) => {
+                      useStore.setState((s) => ({
+                        showQueue: s.showQueue.map((item) =>
+                          item.id === currentItem.id ? { ...item, slideIndex: index } : item
+                        ),
+                      }));
+                    }}
+                  />
                 )}
               </div>
             ) : (
-              <div className="text-center">
+              <div className="flex flex-col items-center justify-center h-full text-center px-4">
                 <span className="text-4xl mb-3 block">🎬</span>
                 <p className="text-sm" style={{ color: "#555" }}>
                   No item selected
@@ -377,6 +523,8 @@ export default function ShowTab() {
           videos={videos}
           songs={songs}
           pdfGroups={pdfGroups}
+          music={music}
+          playlists={playlists}
           onAdd={handleAddItem}
           onClose={() => setIsAddModalOpen(false)}
         />
@@ -395,9 +543,11 @@ function buildOutputPayload(
     countdownRemaining: number;
     countdownLabel: string;
     countdownTheme: any;
+    music: any[];
+    playlists: any[];
   }
 ): OutputPayload {
-  const { slides, videos, songs, pdfGroups, countdownRemaining, countdownLabel, countdownTheme } = data;
+  const { slides, videos, songs, pdfGroups, countdownRemaining, countdownLabel, countdownTheme, music, playlists } = data;
 
   switch (item.type) {
     case "image": {
@@ -442,6 +592,43 @@ function buildOutputPayload(
           theme: countdownTheme,
         },
       };
+    case "music": {
+      const track = item.musicTrackId ? music.find((m) => m.id === item.musicTrackId) : null;
+      if (!track) return { mode: "blank" };
+      // If showMusicOverlay is explicitly set to false, show blackout instead
+      if (item.showMusicOverlay === false) {
+        return { mode: "blackout" };
+      }
+      return {
+        mode: "music",
+        music: {
+          src: track.src,
+          playing: true,
+          trackName: track.name,
+          artist: track.artist,
+        },
+      };
+    }
+    case "playlist": {
+      const playlist = item.playlistId ? playlists.find((p) => p.id === item.playlistId) : null;
+      if (!playlist || playlist.tracks.length === 0) return { mode: "blank" };
+      const firstTrack = playlist.tracks[0];
+      // If showMusicOverlay is explicitly set to false, show blackout instead
+      if (item.showMusicOverlay === false) {
+        return { mode: "blackout" };
+      }
+      return {
+        mode: "music",
+        music: {
+          src: firstTrack.src,
+          playing: true,
+          trackName: firstTrack.name,
+          artist: firstTrack.artist,
+        },
+      };
+    }
+    default:
+      return { mode: "blank" };
   }
 }
 
@@ -457,6 +644,10 @@ function getItemIcon(type: ShowItem["type"]): string {
       return "⏱️";
     case "pdf":
       return "📊";
+    case "music":
+      return "🎶";
+    case "playlist":
+      return "📀";
   }
 }
 
@@ -466,7 +657,9 @@ function getItemLabel(
   slides: any[],
   videos: any[],
   songs: any[],
-  pdfGroups: any[]
+  pdfGroups: any[],
+  music: any[],
+  playlists: any[]
 ): string {
   switch (type) {
     case "image": {
@@ -487,6 +680,14 @@ function getItemLabel(
     }
     case "countdown":
       return "Countdown";
+    case "music": {
+      const track = music.find((m) => m.id === refId);
+      return track ? `Musik: ${track.name}` : "Musik";
+    }
+    case "playlist": {
+      const playlist = playlists.find((p) => p.id === refId);
+      return playlist ? `Playlist: ${playlist.name}` : "Playlist";
+    }
   }
 }
 
@@ -495,12 +696,14 @@ interface AddToShowModalProps {
   videos: any[];
   songs: any[];
   pdfGroups: any[];
-  onAdd: (type: ShowItem["type"], refId?: string) => void;
+  music: any[];
+  playlists: any[];
+  onAdd: (type: ShowItem["type"], refId?: string, extra?: { musicTrackId?: string; playlistId?: string }) => void;
   onClose: () => void;
 }
 
-function AddToShowModal({ slides, videos, songs, pdfGroups, onAdd, onClose }: AddToShowModalProps) {
-  const [activeSection, setActiveSection] = useState<"media" | "songs" | "pdf" | "countdown">("media");
+function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, onAdd, onClose }: AddToShowModalProps) {
+  const [activeSection, setActiveSection] = useState<"media" | "songs" | "pdf" | "countdown" | "music">("media");
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={onClose}>
@@ -540,6 +743,14 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, onAdd, onClose }: Ad
             }`}
           >
             📊 PowerPoint
+          </button>
+          <button
+            onClick={() => setActiveSection("music")}
+            className={`flex-1 text-xs py-2 transition-all ${
+              activeSection === "music" ? "text-[#f97316] border-b-2 border-[#f97316]" : "text-[#888]"
+            }`}
+          >
+            🎶 Musik
           </button>
           <button
             onClick={() => setActiveSection("countdown")}
@@ -688,8 +899,180 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, onAdd, onClose }: Ad
               </button>
             </div>
           )}
+
+          {activeSection === "music" && (
+            <div className="space-y-4">
+              {/* Single Tracks */}
+              <div>
+                <p className="text-[10px] uppercase tracking-widest mb-2" style={{ color: "#555" }}>
+                  Einzelne Lieder
+                </p>
+                <div className="space-y-1">
+                  {music.length === 0 ? (
+                    <p className="text-xs text-center py-4" style={{ color: "#666" }}>
+                      Keine Musik verfügbar. Füge zuerst Musik im Musik-Tab hinzu.
+                    </p>
+                  ) : (
+                    music.map((track) => (
+                      <button
+                        key={track.id}
+                        onClick={() => onAdd("music", undefined, { musicTrackId: track.id })}
+                        className="w-full flex items-center gap-2 p-2 rounded-lg text-left transition-all hover:bg-[#222]"
+                        style={{ background: "#141414", border: "1px solid #222" }}
+                      >
+                        <span className="text-lg">🎶</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs truncate" style={{ color: "#ccc" }}>
+                            {track.name}
+                          </p>
+                          {track.artist && (
+                            <p className="text-[9px] truncate" style={{ color: "#666" }}>
+                              {track.artist}
+                            </p>
+                          )}
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Playlists */}
+              {playlists.length > 0 && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest mb-2" style={{ color: "#555" }}>
+                    Playlists
+                  </p>
+                  <div className="space-y-1">
+                    {playlists.map((playlist) => (
+                      <button
+                        key={playlist.id}
+                        onClick={() => onAdd("playlist", undefined, { playlistId: playlist.id })}
+                        className="w-full flex items-center gap-2 p-2 rounded-lg text-left transition-all hover:bg-[#222]"
+                        style={{ background: "#141414", border: "1px solid #222" }}
+                      >
+                        <span className="text-lg">📀</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs truncate" style={{ color: "#ccc" }}>
+                            {playlist.name}
+                          </p>
+                          <p className="text-[9px] truncate" style={{ color: "#666" }}>
+                            {playlist.tracks.length} Tracks
+                          </p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Slide Grid Component (Pro Presenter Style)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface SlideGridProps {
+  item: ShowItem;
+  songs: any[];
+  pdfGroups: any[];
+  onSelectSlide: (index: number) => void;
+}
+
+function SlideGrid({ item, songs, pdfGroups, onSelectSlide }: SlideGridProps) {
+  const currentSlideIndex = item.slideIndex ?? 0;
+
+  // Get slides for song
+  if (item.type === "song" && item.refId) {
+    const song = songs.find((s) => s.id === item.refId);
+    if (!song || !song.slides) return null;
+
+    return (
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="text-xs font-medium" style={{ color: "#888" }}>
+            📋 Song Folien ({song.slides.length})
+          </h4>
+          <span className="text-[10px]" style={{ color: "#555" }}>
+            Aktuell: Folie {currentSlideIndex + 1}
+          </span>
+        </div>
+        <div className="grid grid-cols-4 gap-3">
+          {song.slides.map((slide: any, index: number) => (
+            <button
+              key={slide.id}
+              onClick={() => onSelectSlide(index)}
+              className={`aspect-video rounded-lg border-2 overflow-hidden transition-all hover:scale-105 ${
+                index === currentSlideIndex
+                  ? "border-[#f97316] ring-2 ring-[#f9731640]"
+                  : "border-[#333] hover:border-[#555]"
+              }`}
+            >
+              <div className="w-full h-full flex flex-col p-2 text-left">
+                {slide.label && (
+                  <div className="text-[9px] font-medium mb-1 truncate" style={{ color: "#f97316" }}>
+                    {slide.label}
+                  </div>
+                )}
+                <div className="flex-1 overflow-hidden">
+                  <p className="text-[10px] leading-tight whitespace-pre-line" style={{ color: "#ccc" }}>
+                    {slide.text}
+                  </p>
+                </div>
+                <div className="text-[9px] mt-1" style={{ color: "#555" }}>
+                  {index + 1} / {song.slides.length}
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Get slides for PDF
+  if (item.type === "pdf" && item.refId) {
+    const group = pdfGroups.find((g) => g.id === item.refId);
+    if (!group || !group.pages) return null;
+
+    return (
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="text-xs font-medium" style={{ color: "#888" }}>
+            📊 PowerPoint Seiten ({group.pages.length})
+          </h4>
+          <span className="text-[10px]" style={{ color: "#555" }}>
+            Aktuell: Seite {currentSlideIndex + 1}
+          </span>
+        </div>
+        <div className="grid grid-cols-4 gap-3">
+          {group.pages.map((page: any, index: number) => (
+            <button
+              key={page.id}
+              onClick={() => onSelectSlide(index)}
+              className={`aspect-video rounded-lg border-2 overflow-hidden transition-all hover:scale-105 ${
+                index === currentSlideIndex
+                  ? "border-[#f97316] ring-2 ring-[#f9731640]"
+                  : "border-[#333] hover:border-[#555]"
+              }`}
+            >
+              <div className="w-full h-full relative">
+                <img src={page.src} alt="" className="w-full h-full object-cover" />
+                <div className="absolute bottom-1 right-1 text-[9px] px-1.5 py-0.5 rounded bg-black/80 text-white">
+                  {index + 1}
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return null;
 }

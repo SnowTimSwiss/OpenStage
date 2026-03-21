@@ -1,13 +1,16 @@
 import { create } from "zustand";
+import { listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   sendToOutput,
+  getLastOutputPayload,
   openOutputWindowForMonitor,
   assignOutputWindowToMonitor,
   closeOutputWindowForMonitor,
   closeAllOutputWindows as closeAllOutputFn,
+  OUTPUT_READY_EVENT,
 } from "../lib/events";
 import { secondsUntilTargetTime } from "../lib/formatTime";
 import type {
@@ -31,6 +34,7 @@ let countdownBgStarting = false;
 let countdownBgStartOffsetSeconds = 0;
 let countdownEndTime: number | null = null;
 let countdownFadeOutTimeout: ReturnType<typeof setTimeout> | null = null;
+let outputReadyListenerInitialized = false;
 
 function formatUnknownError(err: unknown): string {
   if (err instanceof Error) return `${err.name}: ${err.message}`;
@@ -54,6 +58,15 @@ function isOutputWebview(): boolean {
   } catch {
     return false;
   }
+}
+
+function initOutputReplayListener() {
+  if (outputReadyListenerInitialized || isOutputWebview() || typeof window === "undefined") return;
+  outputReadyListenerInitialized = true;
+
+  void listen(OUTPUT_READY_EVENT, () => {
+    void sendToOutput(getLastOutputPayload());
+  });
 }
 
 function ensureMusicAudio(): HTMLAudioElement | null {
@@ -559,6 +572,7 @@ interface Store {
   showPreviousSlide: () => void; // previous slide within current item
   reorderShowQueue: (fromIndex: number, toIndex: number) => void;
   clearShowQueue: () => void;
+  advanceShowOnMusicEnd: () => void; // advance show when music track ends
 
   // ── Persist settings ────────────────────────────────────────────────────
   loadSettings: () => void;
@@ -1333,8 +1347,40 @@ export const useStore = create<Store>((set, get) => ({
   toggleMusicPlaying: () => get().setMusicPlaying(!get().musicPlaying),
 
   playNextMusic: () => {
-    const { music, musicIndex, setMusicIndex, setMusicPlaying } = get();
+    const { music, musicIndex, setMusicIndex, setMusicPlaying, showQueue, advanceShowOnMusicEnd } = get();
     if (music.length === 0) return;
+    
+    // Check if we're in a playlist context (for show mode)
+    // If current music is part of a playlist item in show, handle playlist advancement
+    const { playlists } = get();
+    const currentShowItem = showQueue.length > 0 ? showQueue[get().showCurrentIndex] : null;
+    
+    // If we're in show mode with a playlist item, check if we should advance show
+    if (currentShowItem && currentShowItem.type === "playlist" && currentShowItem.playlistId) {
+      const playlist = playlists.find((p) => p.id === currentShowItem.playlistId);
+      if (playlist) {
+        const currentTrackIndex = playlist.tracks.findIndex((t) => t.id === music[musicIndex]?.id);
+        const nextTrackIndex = currentTrackIndex + 1;
+        
+        // If there's a next track in the playlist, play it
+        if (nextTrackIndex < playlist.tracks.length) {
+          const nextTrack = playlist.tracks[nextTrackIndex];
+          const nextTrackGlobalIndex = music.findIndex((m) => m.id === nextTrack.id);
+          if (nextTrackGlobalIndex >= 0) {
+            setMusicIndex(nextTrackGlobalIndex);
+            set({ musicCurrentTime: 0 });
+            setMusicPlaying(true);
+            return;
+          }
+        }
+        
+        // Last track in playlist - advance show
+        advanceShowOnMusicEnd();
+        return;
+      }
+    }
+    
+    // Default behavior: cycle through all music
     let next = musicIndex;
     for (let i = 0; i < music.length; i++) {
       next = (next + 1) % music.length;
@@ -1583,17 +1629,96 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   showNext: () => {
-    const { showQueue, showCurrentIndex } = get();
+    const { showQueue, showCurrentIndex, music, playlists } = get();
     if (showQueue.length === 0) return;
     const nextIndex = Math.min(showQueue.length - 1, showCurrentIndex + 1);
+    
+    // Handle music playback for music/playlist items
+    const nextItem = showQueue[nextIndex];
+    if (nextItem && (nextItem.type === "music" || nextItem.type === "playlist")) {
+      let trackToPlay: MusicItem | undefined;
+      
+      if (nextItem.type === "music" && nextItem.musicTrackId) {
+        trackToPlay = music.find((m) => m.id === nextItem.musicTrackId);
+      } else if (nextItem.type === "playlist" && nextItem.playlistId) {
+        const playlist = playlists.find((p) => p.id === nextItem.playlistId);
+        if (playlist && playlist.tracks.length > 0) {
+          trackToPlay = playlist.tracks[0];
+        }
+      }
+      
+      if (trackToPlay) {
+        const trackIndex = music.findIndex((m) => m.id === trackToPlay!.id);
+        if (trackIndex >= 0) {
+          set({ musicIndex: trackIndex, musicPlaying: true });
+        }
+      }
+    }
+    
     set({ showCurrentIndex: nextIndex });
   },
 
   showPrevious: () => {
-    const { showQueue, showCurrentIndex } = get();
+    const { showQueue, showCurrentIndex, music, playlists } = get();
     if (showQueue.length === 0) return;
     const prevIndex = Math.max(0, showCurrentIndex - 1);
+    
+    // Handle music playback for music/playlist items
+    const prevItem = showQueue[prevIndex];
+    if (prevItem && (prevItem.type === "music" || prevItem.type === "playlist")) {
+      let trackToPlay: MusicItem | undefined;
+      
+      if (prevItem.type === "music" && prevItem.musicTrackId) {
+        trackToPlay = music.find((m) => m.id === prevItem.musicTrackId);
+      } else if (prevItem.type === "playlist" && prevItem.playlistId) {
+        const playlist = playlists.find((p) => p.id === prevItem.playlistId);
+        if (playlist && playlist.tracks.length > 0) {
+          trackToPlay = playlist.tracks[0];
+        }
+      }
+      
+      if (trackToPlay) {
+        const trackIndex = music.findIndex((m) => m.id === trackToPlay!.id);
+        if (trackIndex >= 0) {
+          set({ musicIndex: trackIndex, musicPlaying: true });
+        }
+      }
+    }
+    
     set({ showCurrentIndex: prevIndex });
+  },
+
+  // Advance show to next item (called when music track ends)
+  advanceShowOnMusicEnd: () => {
+    const { showQueue, showCurrentIndex, music, playlists } = get();
+    if (showQueue.length === 0) return;
+    
+    const currentItem = showQueue[showCurrentIndex];
+    if (!currentItem) return;
+    
+    // Check if current item is music/playlist
+    if (currentItem.type === "music" || currentItem.type === "playlist") {
+      // Check if we should advance to next item
+      let currentTrackId: string | undefined;
+      
+      if (currentItem.type === "music" && currentItem.musicTrackId) {
+        currentTrackId = currentItem.musicTrackId;
+      } else if (currentItem.type === "playlist" && currentItem.playlistId) {
+        const playlist = playlists.find((p) => p.id === currentItem.playlistId);
+        const currentMusicTrack = music[music.findIndex((m) => m.id === currentTrackId)];
+        // Find current track in playlist
+        const playlistTrackIndex = playlist?.tracks.findIndex((t) => t.id === currentMusicTrack?.id);
+        // If this is the last track in the playlist, advance show
+        if (playlistTrackIndex !== undefined && playlistTrackIndex >= 0 && 
+            playlistTrackIndex === (playlist?.tracks.length ?? 0) - 1) {
+          // Advance to next show item
+          const nextIndex = Math.min(showQueue.length - 1, showCurrentIndex + 1);
+          if (nextIndex > showCurrentIndex) {
+            set({ showCurrentIndex: nextIndex });
+          }
+        }
+      }
+    }
   },
 
   showNextSlide: () => {
@@ -1871,6 +1996,7 @@ useStore.subscribe((state, prevState) => {
 // Load settings on init
 (() => {
   if (typeof window !== "undefined") {
+    initOutputReplayListener();
     useStore.getState().loadSettings();
     initMusicEngine();
   }

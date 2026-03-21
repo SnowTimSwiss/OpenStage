@@ -133,6 +133,42 @@ export default function OutputRenderer({
     );
   }
 
+  if (mode === "music" && state.music) {
+    return (
+      <div
+        className={`${rootClassName} bg-black flex items-center justify-center transition-opacity duration-300`}
+        style={transitionStyle}
+      >
+        <div className="text-center">
+          {state.music.trackName && (
+            <p
+              className="text-white font-medium mb-2"
+              style={{
+                fontSize: compact ? "1.25rem" : "2.5rem",
+                fontFamily: "'Sora', sans-serif",
+                textShadow: "0 2px 20px rgba(0,0,0,0.8)",
+              }}
+            >
+              {state.music.trackName}
+            </p>
+          )}
+          {state.music.artist && (
+            <p
+              className="text-white/60"
+              style={{
+                fontSize: compact ? "0.875rem" : "1.5rem",
+                fontFamily: "'Sora', sans-serif",
+                textShadow: "0 2px 20px rgba(0,0,0,0.8)",
+              }}
+            >
+              {state.music.artist}
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   if (mode === "countdown" && state.countdown !== undefined) {
     const { remaining, label, theme = "default", isFadingOut = false } = state.countdown;
     const urgent = remaining <= 10 && remaining > 0;

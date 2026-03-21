@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { OUTPUT_EVENT, VIDEO_CTRL_EVENT } from "../lib/events";
+import { OUTPUT_EVENT, OUTPUT_READY_EVENT, VIDEO_CTRL_EVENT } from "../lib/events";
 import type { OutputPayload } from "../types";
 import OutputRenderer from "./OutputRenderer";
 
@@ -76,42 +76,66 @@ export default function OutputApp() {
   }, [state]);
 
   useEffect(() => {
-    const unlisten = listen<OutputPayload>(OUTPUT_EVENT, (e) => {
-      console.log("Output event received:", e.payload);
-      const next = e.payload;
+    let disposed = false;
+    let unlistenOutput: (() => void) | null = null;
+    let unlistenCtrl: (() => void) | null = null;
 
-      if (transitioningRef.current) {
-        setPendingState(next);
+    const setupListeners = async () => {
+      unlistenOutput = await listen<OutputPayload>(OUTPUT_EVENT, (e) => {
+        console.log("[OutputApp] Received output event:", e.payload);
+        const next = e.payload;
+
+        if (transitioningRef.current) {
+          console.log("[OutputApp] Still transitioning, setting pending state");
+          setPendingState(next);
+          return;
+        }
+
+        if (next.mode !== currentModeRef.current) {
+          console.log("[OutputApp] Mode changed, starting transition");
+          transitioningRef.current = true;
+          setPendingState(next);
+          setIsTransitioning(true);
+          return;
+        }
+
+        console.log("[OutputApp] Same mode, updating state directly");
+        currentModeRef.current = next.mode;
+        setState(next);
+      });
+
+      unlistenCtrl = await listen<{ action: string }>(VIDEO_CTRL_EVENT, (e) => {
+        if (!videoRef.current) return;
+        if (e.payload.action === "play") {
+          videoRef.current.play().catch((err) => {
+            console.error("Play error:", err);
+            setVideoError(true);
+          });
+        }
+        if (e.payload.action === "pause") {
+          videoRef.current.pause();
+        }
+      });
+
+      if (disposed) {
+        unlistenOutput?.();
+        unlistenCtrl?.();
         return;
       }
 
-      if (next.mode !== currentModeRef.current) {
-        transitioningRef.current = true;
-        setPendingState(next);
-        setIsTransitioning(true);
-        return;
-      }
+      await emit(OUTPUT_READY_EVENT, {});
+    };
 
-      currentModeRef.current = next.mode;
-      setState(next);
-    });
-
-    const unlistenCtrl = listen<{ action: string }>(VIDEO_CTRL_EVENT, (e) => {
-      if (!videoRef.current) return;
-      if (e.payload.action === "play") {
-        videoRef.current.play().catch((err) => {
-          console.error("Play error:", err);
-          setVideoError(true);
-        });
-      }
-      if (e.payload.action === "pause") {
-        videoRef.current.pause();
-      }
-    });
+    void setupListeners();
 
     return () => {
-      unlisten.then((f) => f());
-      unlistenCtrl.then((f) => f());
+      disposed = true;
+      if (transitionTimeoutRef.current) {
+        clearTimeout(transitionTimeoutRef.current);
+        transitionTimeoutRef.current = null;
+      }
+      unlistenOutput?.();
+      unlistenCtrl?.();
     };
   }, []);
 

@@ -2,6 +2,25 @@
 
 Alle wesentlichen Änderungen an OpenStage werden in dieser Datei dokumentiert.
 
+## [1.2.0] - 2026-03-21
+
+### Hinzugefügt
+- **Musik in der Show** – Einzelne Lieder oder Playlists zur Show hinzufügen
+  - Musik-Tracks aus dem Music-Tab direkt zur Show-Queue hinzufügen
+  - Ganze Playlists als Show-Item verwenden
+  - Automatische Wiedergabe beim Wechsel zum Musik-Element
+  - Titel und Künstler werden im Output angezeigt
+- **Musik-Overlay umschaltbar** – Pro Lied/Playlist einstellbar
+  - 👁 Icon in der Queue: Overlay ein/aus schalten
+  - Bei "aus": Blackscreen im Output (Musik läuft weiter)
+  - Bei "ein": Titel & Künstler werden angezeigt
+- **Pro Presenter Grid-Ansicht** – Folien-Übersicht für Songs & PDFs
+  - Alle Folien auf einen Blick in 4-Spalten-Grid
+  - Klick auf Folie springt direkt dazu
+  - Aktuelle Folie orange hervorgehoben
+  - Song-Folien mit Label (Strophe, Refrain, etc.)
+  - PDF-Seiten als Thumbnail-Vorschau
+
 ## [1.0.0] - 2026-03-18
 
 ### Hinzugefügt
