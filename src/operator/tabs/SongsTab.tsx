@@ -1,10 +1,18 @@
 import { useState, useMemo } from "react";
 import { useStore } from "../../store/useStore";
-import type { Song, SongSlide } from "../../types";
+import type { Song, SongSlide, RepositorySong } from "../../types";
 import { save as saveFile, open as openFile } from "@tauri-apps/plugin-dialog";
 import { writeFile, readFile } from "@tauri-apps/plugin-fs";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 type View = "list" | "editor" | "live";
+const SONGS_REPOSITORY_URL = "https://github.com/SnowTimSwiss/OpenStage-songs";
+
+type MessageDialogState = {
+  title: string;
+  message: string;
+  tone?: "neutral" | "success" | "danger";
+} | null;
 
 export default function SongsTab() {
   const songs = useStore((s) => s.songs);
@@ -18,9 +26,18 @@ export default function SongsTab() {
   const nextSongSlide = useStore((s) => s.nextSongSlide);
   const prevSongSlide = useStore((s) => s.prevSongSlide);
 
+  // GitHub Repository functions
+  const fetchRepositorySongs = useStore((s) => s.fetchRepositorySongs);
+  const downloadRepositorySong = useStore((s) => s.downloadRepositorySong);
+
   const [view, setView] = useState<View>("list");
   const [editingSong, setEditingSong] = useState<Song | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isRepoModalOpen, setIsRepoModalOpen] = useState(false);
+  const [repositorySongs, setRepositorySongs] = useState<RepositorySong[]>([]);
+  const [isLoadingRepo, setIsLoadingRepo] = useState(false);
+  const [repoError, setRepoError] = useState<string | null>(null);
+  const [messageDialog, setMessageDialog] = useState<MessageDialogState>(null);
 
   const filteredSongs = useMemo(() => {
     if (!searchQuery.trim()) return songs;
@@ -34,6 +51,10 @@ export default function SongsTab() {
   }, [songs, searchQuery]);
 
   const activeSong = songs.find((s) => s.id === activeSongId) ?? null;
+
+  function showMessage(title: string, message: string, tone: "neutral" | "success" | "danger" = "neutral") {
+    setMessageDialog({ title, message, tone });
+  }
 
   function startNew() {
     setEditingSong({
@@ -86,17 +107,54 @@ export default function SongsTab() {
       const content = await readFile(filePath);
       const songData = new TextDecoder().decode(content);
       const song: Omit<Song, "id"> = JSON.parse(songData);
-      
+
       // Validate basic structure
       if (!song.title || !Array.isArray(song.slides)) {
         throw new Error("Ungültiges Song-Format");
       }
-      
+
       addSong(song);
     } catch (err) {
       console.error("Failed to import song:", err);
-      alert("Fehler beim Importieren: Ungültiges Song-Format");
+      showMessage("Import fehlgeschlagen", "Fehler beim Importieren: Ungueltiges Song-Format", "danger");
     }
+  }
+
+  async function loadRepositorySongs() {
+    setIsLoadingRepo(true);
+    setRepoError(null);
+    try {
+      const songs = await fetchRepositorySongs();
+      setRepositorySongs(songs);
+    } catch (err) {
+      setRepoError(err instanceof Error ? err.message : "Repository konnte nicht geladen werden");
+    } finally {
+      setIsLoadingRepo(false);
+    }
+  }
+
+  async function handleDownloadSong(repoSong: RepositorySong) {
+    try {
+      await downloadRepositorySong(repoSong);
+      // Refresh repository list to show updated status
+      await loadRepositorySongs();
+    } catch (err) {
+      showMessage("Download fehlgeschlagen", err instanceof Error ? err.message : "Download fehlgeschlagen", "danger");
+    }
+  }
+
+  async function openRepositoryExternally() {
+    try {
+      await openUrl(SONGS_REPOSITORY_URL);
+    } catch (err) {
+      console.error("Failed to open GitHub repository:", err);
+      showMessage("GitHub konnte nicht geöffnet werden", "Die GitHub-Seite konnte nicht automatisch geöffnet werden.", "danger");
+    }
+  }
+
+  function openRepositoryModal() {
+    setIsRepoModalOpen(true);
+    void loadRepositorySongs();
   }
 
   // ── EDITOR ────────────────────────────────────────────────────────────────
@@ -192,6 +250,14 @@ export default function SongsTab() {
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-white">Lieder</h2>
           <div className="flex gap-2">
+            <button
+              onClick={openRepositoryModal}
+              className="text-xs px-3 py-1.5 rounded font-medium"
+              style={{ background: "#1f1f1f", color: "#22c55e", border: "1px solid #333" }}
+              title="Songs aus dem GitHub Repository laden"
+            >
+              🌐 Repository
+            </button>
             <button
               onClick={importSong}
               className="text-xs px-3 py-1.5 rounded font-medium"
@@ -296,6 +362,28 @@ export default function SongsTab() {
           })
         )}
       </div>
+
+      {messageDialog && (
+        <MessageDialog
+          title={messageDialog.title}
+          message={messageDialog.message}
+          tone={messageDialog.tone}
+          onClose={() => setMessageDialog(null)}
+        />
+      )}
+
+      {isRepoModalOpen && (
+        <RepositoryModal
+          isOpen={isRepoModalOpen}
+          onClose={() => setIsRepoModalOpen(false)}
+          repositorySongs={repositorySongs}
+          isLoading={isLoadingRepo}
+          error={repoError}
+          onRefresh={loadRepositorySongs}
+          onDownload={handleDownloadSong}
+          onOpenRepository={openRepositoryExternally}
+        />
+      )}
     </div>
   );
 }
@@ -422,5 +510,236 @@ function Input({ value, onChange, placeholder }: { value: string; onChange: (v: 
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
     />
+  );
+}
+
+function MessageDialog({
+  title,
+  message,
+  tone = "neutral",
+  onClose,
+}: {
+  title: string;
+  message: string;
+  tone?: "neutral" | "success" | "danger";
+  onClose: () => void;
+}) {
+  const accent = tone === "success" ? "#22c55e" : tone === "danger" ? "#ef4444" : "#f97316";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={onClose}>
+      <div
+        className="w-[420px] rounded-xl overflow-hidden"
+        style={{ background: "#1a1a1a", border: `1px solid ${accent}` }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-4 py-3 border-b" style={{ borderColor: "#333" }}>
+          <h3 className="text-sm font-semibold text-white">{title}</h3>
+        </div>
+        <div className="p-4">
+          <p className="text-sm whitespace-pre-line" style={{ color: "#ccc" }}>{message}</p>
+        </div>
+        <div className="px-4 py-3 border-t flex justify-end" style={{ borderColor: "#333" }}>
+          <button
+            onClick={onClose}
+            className="text-xs px-4 py-2 rounded font-medium"
+            style={{ background: accent, color: tone === "success" ? "#08130a" : "white" }}
+          >
+            OK
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface RepositoryModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  repositorySongs: RepositorySong[];
+  isLoading: boolean;
+  error: string | null;
+  onRefresh: () => void;
+  onDownload: (song: RepositorySong) => void;
+  onOpenRepository: () => void;
+}
+
+function RepositoryModal({
+  isOpen,
+  onClose,
+  repositorySongs,
+  isLoading,
+  error,
+  onRefresh,
+  onDownload,
+  onOpenRepository,
+}: RepositoryModalProps) {
+  const [repoSearchQuery, setRepoSearchQuery] = useState("");
+  const filteredRepositorySongs = useMemo(() => {
+    const query = repoSearchQuery.trim().toLowerCase();
+    if (!query) return repositorySongs;
+    return repositorySongs.filter((song) => song.name.toLowerCase().includes(query));
+  }, [repoSearchQuery, repositorySongs]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={onClose}>
+      <div
+        className="w-[600px] max-h-[80vh] rounded-xl overflow-hidden flex flex-col"
+        style={{ background: "#1a1a1a", border: "1px solid #333" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: "#333" }}>
+          <div className="flex items-center gap-2">
+            <span className="text-lg">🌐</span>
+            <h3 className="text-sm font-semibold text-white">OpenStage Songs Repository</h3>
+          </div>
+          <button onClick={onClose} className="text-xs px-2 py-1 rounded hover:bg-[#333]" style={{ color: "#888" }}>
+            ✕
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-4">
+          {/* Songs List */}
+          <div className="mb-4 p-3 rounded-lg" style={{ background: "#0f0f0f", border: "1px solid #2a2a2a" }}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-xs font-medium" style={{ color: "#ddd" }}>
+                Online-Songs suchen & herunterladen
+              </div>
+              <button
+                onClick={onRefresh}
+                disabled={isLoading}
+                className="text-xs px-2 py-1 rounded"
+                style={{ background: "#1f1f1f", color: "#888", border: "1px solid #333" }}
+              >
+                {isLoading ? "Lädt..." : "Aktualisieren"}
+              </button>
+            </div>
+
+            <input
+              type="text"
+              value={repoSearchQuery}
+              onChange={(e) => setRepoSearchQuery(e.target.value)}
+              placeholder="Online-Songs im Repository suchen..."
+              className="w-full text-xs px-3 py-2 rounded outline-none mb-3"
+              style={{ background: "#141414", border: "1px solid #333", color: "#ddd" }}
+            />
+
+            {error && (
+              <div className="p-3 rounded-lg mb-3" style={{ background: "#2a0a0a", border: "1px solid #ef4444" }}>
+                <div className="text-xs" style={{ color: "#ef4444" }}>{error}</div>
+              </div>
+            )}
+
+            {isLoading ? (
+              <div className="text-center py-8">
+                <div className="text-xs" style={{ color: "#666" }}>Lade Repository...</div>
+              </div>
+            ) : filteredRepositorySongs.length === 0 ? (
+              <div className="text-center py-8">
+                <div className="text-xs" style={{ color: "#666" }}>
+                  {repositorySongs.length === 0 ? "Keine Songs im Repository gefunden" : "Keine Songs für diese Suche gefunden"}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-80 overflow-y-auto">
+                {filteredRepositorySongs.map((repoSong) => (
+                  <div
+                    key={repoSong.path}
+                    className="flex items-center gap-3 p-3 rounded-lg"
+                    style={{ background: "#141414", border: "1px solid #1e1e1e" }}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate" style={{ color: "#ddd" }}>
+                        {repoSong.name}
+                      </div>
+                      <div className="text-[11px]" style={{ color: "#555" }}>
+                        {repoSong.isLocal ? (
+                          <span style={{ color: "#22c55e" }}>✓ Lokal verfügbar</span>
+                        ) : (
+                          "Nicht heruntergeladen"
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => onDownload(repoSong)}
+                      disabled={repoSong.isLocal}
+                      className="text-xs px-3 py-1.5 rounded font-medium"
+                      style={{
+                        background: repoSong.isLocal ? "#1f1f1f" : "#f97316",
+                        color: repoSong.isLocal ? "#555" : "white",
+                        border: "1px solid #333",
+                      }}
+                    >
+                      {repoSong.isLocal ? "✓ Hinzugefügt" : "Download"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="mb-4 p-3 rounded-lg" style={{ background: "#0f0f0f", border: "1px solid #2a2a2a" }}>
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <div>
+                <div className="text-xs font-medium" style={{ color: "#ddd" }}>
+                  Repository auf GitHub
+                </div>
+                <div className="text-[11px] mt-1" style={{ color: "#666" }}>
+                  Hier kannst du das Song-Repository direkt im Browser öffnen, wenn du die Sammlung ansehen oder verwalten möchtest.
+                </div>
+              </div>
+              <button
+                onClick={onOpenRepository}
+                className="shrink-0 text-xs px-3 py-1.5 rounded"
+                style={{ background: "#1f1f1f", color: "#22c55e", border: "1px solid #333" }}
+              >
+                GitHub öffnen
+              </button>
+            </div>
+
+            <p className="text-[10px] mt-3" style={{ color: "#555" }}>
+              Suche und Download bleiben hier im Vordergrund. Der GitHub-Link ist nur ein zusätzlicher Direktzugriff auf das Repository.
+            </p>
+          </div>
+
+          {/* Info Box */}
+          <div className="mb-4 p-3 rounded-lg" style={{ background: "#0f0f0f", border: "1px solid #2a2a2a" }}>
+            <div className="text-xs font-medium mb-1" style={{ color: "#ddd" }}>
+              📖 OpenStage Songs Repository
+            </div>
+            <p className="text-[11px]" style={{ color: "#666" }}>
+              Lade kostenlose Songs aus dem Community-Repository herunter. Alle Songs sind unter CC0-1.0 lizenziert
+              und können frei verwendet werden.
+            </p>
+            <button
+              onClick={onOpenRepository}
+              className="text-[11px] mt-2 inline-block"
+              style={{ color: "#f97316" }}
+            >
+              Repository auf GitHub ansehen →
+            </button>
+          </div>
+
+        </div>
+
+        {/* Footer */}
+        <div className="px-4 py-3 border-t flex items-center justify-between" style={{ borderColor: "#333" }}>
+          <div className="text-[10px]" style={{ color: "#555" }}>
+            📄 Lizenz: CC0-1.0 (Public Domain)
+          </div>
+          <button
+            onClick={onClose}
+            className="text-xs px-4 py-1.5 rounded"
+            style={{ background: "#1f1f1f", color: "#888", border: "1px solid #333" }}
+          >
+            Schließen
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

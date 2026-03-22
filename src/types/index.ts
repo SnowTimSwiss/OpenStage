@@ -130,3 +130,45 @@ export interface ShowItem {
   playlistId?: string; // for playlist: which playlist to play
   showMusicOverlay?: boolean; // show title/artist on output (default: true)
 }
+
+// ── GitHub Repository ────────────────────────────────────────────────────────
+
+export interface GitHubSongFile {
+  name: string;
+  path: string;
+  sha: string;
+  size: number;
+  url: string;
+  html_url: string;
+  git_url: string;
+  download_url: string;
+  type: "file";
+  _links: {
+    self: string;
+    git: string;
+    html: string;
+  };
+}
+
+export interface GitHubRepoContent {
+  name: string;
+  path: string;
+  sha: string;
+  size: number;
+  url: string;
+  html_url: string;
+  download_url: string | null;
+  type: "file" | "dir";
+}
+
+export interface RepositorySong {
+  name: string;
+  path: string;
+  sha: string;
+  apiUrl: string;
+  downloadUrl: string;
+  songData?: Song; // Loaded song data
+  isLocal?: boolean; // Already downloaded
+  localVersion?: string; // Local SHA if exists
+  needsUpdate?: boolean; // Remote is newer
+}

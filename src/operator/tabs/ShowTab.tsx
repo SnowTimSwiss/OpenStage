@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../../store/useStore";
 import { sendToOutput } from "../../lib/events";
 import OutputRenderer from "../../output/OutputRenderer";
-import type { OutputPayload, ShowItem } from "../../types";
+import type { OutputPayload, ShowItem, MusicItem } from "../../types";
 
 function formatTime(s: number) {
   if (!Number.isFinite(s) || s < 0) return "00:00";
@@ -43,7 +43,9 @@ export default function ShowTab() {
   const seekMusic = useStore((s) => s.seekMusic);
   const setMusicVolume = useStore((s) => s.setMusicVolume);
 
+  const resetShow = useStore((s) => s.resetShow);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   const previewVideoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -119,7 +121,7 @@ export default function ShowTab() {
   }, [currentItem, slides, videos, songs, pdfGroups, countdownRemaining, countdownLabel, countdownTheme, music, playlists]);
 
   function handleAddItem(type: ShowItem["type"], refId?: string, extra?: { musicTrackId?: string; playlistId?: string }) {
-    const label = getItemLabel(type, refId, slides, videos, songs, pdfGroups, music, playlists);
+    const label = getItemLabel(type, refId, slides, videos, songs, pdfGroups, music, playlists, extra);
     const item: ShowItem = {
       id: crypto.randomUUID(),
       type,
@@ -128,21 +130,41 @@ export default function ShowTab() {
       slideIndex: type === "song" || type === "pdf" ? 0 : undefined,
       musicTrackId: extra?.musicTrackId,
       playlistId: extra?.playlistId,
-      showMusicOverlay: true, // default: show title/artist
     };
     addToShowQueue(item);
     setIsAddModalOpen(false);
   }
 
-  function toggleShowMusicOverlay(itemId: string) {
-    useStore.setState((s) => ({
-      showQueue: s.showQueue.map((item) =>
-        item.id === itemId ? { ...item, showMusicOverlay: !item.showMusicOverlay } : item
-      ),
-    }));
+  function toggleShowMusicOverlay(_itemId: string) {
+    // Music overlays on the output are disabled in show mode.
   }
 
   function handleItemClick(index: number) {
+    const { showQueue, music, playlists } = useStore.getState();
+    const item = showQueue[index];
+    
+    // Handle music playback for music/playlist items
+    if (item && (item.type === "music" || item.type === "playlist")) {
+      let trackToPlay: MusicItem | undefined;
+
+      if (item.type === "music" && item.musicTrackId) {
+        trackToPlay = music.find((m) => m.id === item.musicTrackId);
+      } else if (item.type === "playlist" && item.playlistId) {
+        const playlist = playlists.find((p) => p.id === item.playlistId);
+        if (playlist && playlist.tracks.length > 0) {
+          trackToPlay = playlist.tracks[0];
+        }
+      }
+
+      if (trackToPlay) {
+        const trackIndex = music.findIndex((m) => m.id === trackToPlay!.id);
+        if (trackIndex >= 0) {
+          useStore.getState().setMusicIndex(trackIndex);
+          useStore.getState().setMusicPlaying(true);
+        }
+      }
+    }
+    
     setShowCurrentIndex(index);
   }
 
@@ -195,6 +217,16 @@ export default function ShowTab() {
           >
             + Add to Show
           </button>
+          {showQueue.length > 0 && (
+            <button
+              onClick={() => setShowResetConfirm(true)}
+              className="text-xs px-3 py-1.5 rounded-lg font-medium transition-all"
+              style={{ background: "#2a0a0a", color: "#ef4444", border: "1px solid #333" }}
+              title="Show Queue leeren"
+            >
+              🗑️ Reset
+            </button>
+          )}
         </div>
       </div>
 
@@ -255,7 +287,7 @@ export default function ShowTab() {
                                 {currentSlide}/{totalSlides}
                               </span>
                             )}
-                            {(item.type === "music" || item.type === "playlist") && (
+                            {false && (item.type === "music" || item.type === "playlist") && (
                               <span
                                 className={`text-[9px] px-1 rounded cursor-pointer transition-colors ${
                                   item.showMusicOverlay !== false
@@ -438,28 +470,30 @@ export default function ShowTab() {
             )}
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4">
+          <div className="flex-1 overflow-hidden p-4">
             {currentItem ? (
-              <div className="space-y-4">
+              <div className={`h-full ${currentItem.type === "song" || currentItem.type === "pdf" ? "flex gap-4" : "flex flex-col"}`}>
                 {/* Main Preview */}
-                <div className="w-full aspect-video bg-[#0a0a0a] rounded-lg border border-[#1e1e1e] overflow-hidden relative">
+                <div className={`${currentItem.type === "song" || currentItem.type === "pdf" ? "flex-1" : "w-full"} aspect-video bg-[#0a0a0a] rounded-lg border border-[#1e1e1e] overflow-hidden relative`}>
                   <OutputRenderer state={previewPayload} embedded muteVideo videoRef={previewVideoRef} />
                 </div>
 
                 {/* Slide Grid for Songs and PDFs */}
                 {(currentItem.type === "song" || currentItem.type === "pdf") && (
-                  <SlideGrid
-                    item={currentItem}
-                    songs={songs}
-                    pdfGroups={pdfGroups}
-                    onSelectSlide={(index) => {
-                      useStore.setState((s) => ({
-                        showQueue: s.showQueue.map((item) =>
-                          item.id === currentItem.id ? { ...item, slideIndex: index } : item
-                        ),
-                      }));
-                    }}
-                  />
+                  <div className="w-[320px] flex-shrink-0 overflow-y-auto pr-2">
+                    <SlideGrid
+                      item={currentItem}
+                      songs={songs}
+                      pdfGroups={pdfGroups}
+                      onSelectSlide={(index) => {
+                        useStore.setState((s) => ({
+                          showQueue: s.showQueue.map((item) =>
+                            item.id === currentItem.id ? { ...item, slideIndex: index } : item
+                          ),
+                        }));
+                      }}
+                    />
+                  </div>
                 )}
               </div>
             ) : (
@@ -529,6 +563,41 @@ export default function ShowTab() {
           onClose={() => setIsAddModalOpen(false)}
         />
       )}
+
+      {showResetConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={() => setShowResetConfirm(false)}>
+          <div
+            className="w-[400px] rounded-xl overflow-hidden"
+            style={{ background: "#1a1a1a", border: "1px solid #333" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-3 border-b" style={{ borderColor: "#333" }}>
+              <h3 className="text-sm font-semibold text-white">Show Queue leeren?</h3>
+            </div>
+            <div className="p-4">
+              <p className="text-sm" style={{ color: "#ccc" }}>
+                Dies entfernt alle Items aus der Show Queue. Diese Aktion kann nicht rückgängig gemacht werden.
+              </p>
+            </div>
+            <div className="px-4 py-3 border-t flex items-center justify-end gap-2" style={{ borderColor: "#333" }}>
+              <button
+                onClick={() => setShowResetConfirm(false)}
+                className="text-xs px-4 py-2 rounded font-medium"
+                style={{ background: "#2a2a2a", color: "#888" }}
+              >
+                Abbrechen
+              </button>
+              <button
+                onClick={() => { resetShow(); setShowResetConfirm(false); }}
+                className="text-xs px-4 py-2 rounded font-medium"
+                style={{ background: "#ef4444", color: "white" }}
+              >
+                Leeren
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -593,39 +662,13 @@ function buildOutputPayload(
         },
       };
     case "music": {
-      const track = item.musicTrackId ? music.find((m) => m.id === item.musicTrackId) : null;
-      if (!track) return { mode: "blank" };
-      // If showMusicOverlay is explicitly set to false, show blackout instead
-      if (item.showMusicOverlay === false) {
-        return { mode: "blackout" };
-      }
-      return {
-        mode: "music",
-        music: {
-          src: track.src,
-          playing: true,
-          trackName: track.name,
-          artist: track.artist,
-        },
-      };
+      if (!item.musicTrackId || !music.find((m) => m.id === item.musicTrackId)) return { mode: "blank" };
+      return { mode: "blackout" };
     }
     case "playlist": {
       const playlist = item.playlistId ? playlists.find((p) => p.id === item.playlistId) : null;
       if (!playlist || playlist.tracks.length === 0) return { mode: "blank" };
-      const firstTrack = playlist.tracks[0];
-      // If showMusicOverlay is explicitly set to false, show blackout instead
-      if (item.showMusicOverlay === false) {
-        return { mode: "blackout" };
-      }
-      return {
-        mode: "music",
-        music: {
-          src: firstTrack.src,
-          playing: true,
-          trackName: firstTrack.name,
-          artist: firstTrack.artist,
-        },
-      };
+      return { mode: "blackout" };
     }
     default:
       return { mode: "blank" };
@@ -659,7 +702,8 @@ function getItemLabel(
   songs: any[],
   pdfGroups: any[],
   music: any[],
-  playlists: any[]
+  playlists: any[],
+  extra?: { musicTrackId?: string; playlistId?: string }
 ): string {
   switch (type) {
     case "image": {
@@ -681,11 +725,11 @@ function getItemLabel(
     case "countdown":
       return "Countdown";
     case "music": {
-      const track = music.find((m) => m.id === refId);
+      const track = extra?.musicTrackId ? music.find((m) => m.id === extra.musicTrackId) : null;
       return track ? `Musik: ${track.name}` : "Musik";
     }
     case "playlist": {
-      const playlist = playlists.find((p) => p.id === refId);
+      const playlist = extra?.playlistId ? playlists.find((p) => p.id === extra.playlistId) : null;
       return playlist ? `Playlist: ${playlist.name}` : "Playlist";
     }
   }
@@ -993,16 +1037,8 @@ function SlideGrid({ item, songs, pdfGroups, onSelectSlide }: SlideGridProps) {
     if (!song || !song.slides) return null;
 
     return (
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h4 className="text-xs font-medium" style={{ color: "#888" }}>
-            📋 Song Folien ({song.slides.length})
-          </h4>
-          <span className="text-[10px]" style={{ color: "#555" }}>
-            Aktuell: Folie {currentSlideIndex + 1}
-          </span>
-        </div>
-        <div className="grid grid-cols-4 gap-3">
+      <div className="space-y-2">
+        <div className="grid grid-cols-2 gap-2">
           {song.slides.map((slide: any, index: number) => (
             <button
               key={slide.id}
@@ -1013,18 +1049,18 @@ function SlideGrid({ item, songs, pdfGroups, onSelectSlide }: SlideGridProps) {
                   : "border-[#333] hover:border-[#555]"
               }`}
             >
-              <div className="w-full h-full flex flex-col p-2 text-left">
+              <div className="w-full h-full flex flex-col p-1.5 text-left">
                 {slide.label && (
-                  <div className="text-[9px] font-medium mb-1 truncate" style={{ color: "#f97316" }}>
+                  <div className="text-[8px] font-medium mb-0.5 truncate" style={{ color: "#f97316" }}>
                     {slide.label}
                   </div>
                 )}
                 <div className="flex-1 overflow-hidden">
-                  <p className="text-[10px] leading-tight whitespace-pre-line" style={{ color: "#ccc" }}>
-                    {slide.text}
+                  <p className="text-[9px] leading-tight whitespace-pre-line" style={{ color: "#ccc" }}>
+                    {slide.text.slice(0, 80)}{slide.text.length > 80 ? '...' : ''}
                   </p>
                 </div>
-                <div className="text-[9px] mt-1" style={{ color: "#555" }}>
+                <div className="text-[8px] mt-0.5" style={{ color: "#555" }}>
                   {index + 1} / {song.slides.length}
                 </div>
               </div>
@@ -1041,16 +1077,8 @@ function SlideGrid({ item, songs, pdfGroups, onSelectSlide }: SlideGridProps) {
     if (!group || !group.pages) return null;
 
     return (
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h4 className="text-xs font-medium" style={{ color: "#888" }}>
-            📊 PowerPoint Seiten ({group.pages.length})
-          </h4>
-          <span className="text-[10px]" style={{ color: "#555" }}>
-            Aktuell: Seite {currentSlideIndex + 1}
-          </span>
-        </div>
-        <div className="grid grid-cols-4 gap-3">
+      <div className="space-y-2">
+        <div className="grid grid-cols-2 gap-2">
           {group.pages.map((page: any, index: number) => (
             <button
               key={page.id}
@@ -1063,7 +1091,7 @@ function SlideGrid({ item, songs, pdfGroups, onSelectSlide }: SlideGridProps) {
             >
               <div className="w-full h-full relative">
                 <img src={page.src} alt="" className="w-full h-full object-cover" />
-                <div className="absolute bottom-1 right-1 text-[9px] px-1.5 py-0.5 rounded bg-black/80 text-white">
+                <div className="absolute bottom-1 right-1 text-[8px] px-1 py-0.5 rounded bg-black/80 text-white">
                   {index + 1}
                 </div>
               </div>

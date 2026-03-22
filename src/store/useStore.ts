@@ -13,13 +13,21 @@ import {
   OUTPUT_READY_EVENT,
 } from "../lib/events";
 import { secondsUntilTargetTime } from "../lib/formatTime";
+import {
+  fetchRepoContents,
+  downloadSong,
+  processRepositoryContents,
+} from "../lib/github";
 import type {
   Song, MediaItem, MusicItem, Playlist, MusicSource,
   Monitor, TabId, OutputMode, PdfGroup, CountdownTheme, ShowItem,
+  RepositorySong,
 } from "../types";
 
 const STORAGE_KEY = "openstage-settings-v1";
 const PLAYLISTS_KEY = "openstage-playlists-v1";
+const MEDIA_STORAGE_KEY = "openstage-media-v1";
+const SHOW_STORAGE_KEY = "openstage-show-v1";
 
 let countdownInterval: ReturnType<typeof setInterval> | null = null;
 let musicAudio: HTMLAudioElement | null = null;
@@ -475,6 +483,12 @@ interface Store {
   nextSongSlide: () => void;
   prevSongSlide: () => void;
 
+  // ── GitHub Repository ─────────────────────────────────────────────────
+  githubRepoOwner: string;
+  githubRepoName: string;
+  fetchRepositorySongs: () => Promise<RepositorySong[]>;
+  downloadRepositorySong: (song: RepositorySong) => Promise<Song>;
+
   // ── Countdown ──────────────────────────────────────────────────────────
   countdownRemaining: number;
   countdownLabel: string;
@@ -573,6 +587,10 @@ interface Store {
   reorderShowQueue: (fromIndex: number, toIndex: number) => void;
   clearShowQueue: () => void;
   advanceShowOnMusicEnd: () => void; // advance show when music track ends
+
+  // ── Persist & Reset ─────────────────────────────────────────────────────
+  resetMedia: () => void;
+  resetShow: () => void;
 
   // ── Persist settings ────────────────────────────────────────────────────
   loadSettings: () => void;
@@ -875,6 +893,33 @@ export const useStore = create<Store>((set, get) => ({
     if (!song) return;
     const prev = Math.max(activeSongSlide - 1, 0);
     goLiveSongSlide(activeSongId, prev);
+  },
+
+  // ── GitHub Repository ─────────────────────────────────────────────────
+  githubRepoOwner: "SnowTimSwiss",
+  githubRepoName: "OpenStage-songs",
+
+  fetchRepositorySongs: async () => {
+    const { songs: localSongs } = get();
+    try {
+      const contents = await fetchRepoContents();
+      return await processRepositoryContents(contents, localSongs);
+    } catch (err) {
+      console.error("Failed to fetch repository songs:", err);
+      throw err;
+    }
+  },
+
+  downloadRepositorySong: async (repositorySong: RepositorySong) => {
+    const { addSong } = get();
+    try {
+      const songData = await downloadSong(repositorySong.apiUrl);
+      addSong(songData);
+      return songData;
+    } catch (err) {
+      console.error("Failed to download song:", err);
+      throw err;
+    }
   },
 
   // ── Countdown ──────────────────────────────────────────────────────────
@@ -1690,7 +1735,7 @@ export const useStore = create<Store>((set, get) => ({
 
   // Advance show to next item (called when music track ends)
   advanceShowOnMusicEnd: () => {
-    const { showQueue, showCurrentIndex, music, playlists } = get();
+    const { showQueue, showCurrentIndex, music, musicIndex, playlists, showNext } = get();
     if (showQueue.length === 0) return;
     
     const currentItem = showQueue[showCurrentIndex];
@@ -1705,17 +1750,21 @@ export const useStore = create<Store>((set, get) => ({
         currentTrackId = currentItem.musicTrackId;
       } else if (currentItem.type === "playlist" && currentItem.playlistId) {
         const playlist = playlists.find((p) => p.id === currentItem.playlistId);
-        const currentMusicTrack = music[music.findIndex((m) => m.id === currentTrackId)];
+        const currentMusicTrack = music[musicIndex];
         // Find current track in playlist
         const playlistTrackIndex = playlist?.tracks.findIndex((t) => t.id === currentMusicTrack?.id);
         // If this is the last track in the playlist, advance show
         if (playlistTrackIndex !== undefined && playlistTrackIndex >= 0 && 
             playlistTrackIndex === (playlist?.tracks.length ?? 0) - 1) {
-          // Advance to next show item
-          const nextIndex = Math.min(showQueue.length - 1, showCurrentIndex + 1);
-          if (nextIndex > showCurrentIndex) {
-            set({ showCurrentIndex: nextIndex });
-          }
+          showNext();
+        }
+        return;
+      }
+
+      if (currentItem.type === "music" && currentTrackId) {
+        const nextIndex = Math.min(showQueue.length - 1, showCurrentIndex + 1);
+        if (nextIndex > showCurrentIndex) {
+          showNext();
         }
       }
     }
@@ -1791,6 +1840,9 @@ export const useStore = create<Store>((set, get) => ({
     set({ showQueue: [], showCurrentIndex: -1 });
   },
 
+  resetMedia: () => resetMedia(),
+  resetShow: () => resetShow(),
+
   reorderShowQueue: (fromIndex, toIndex) => {
     set((s) => {
       const newQueue = [...s.showQueue];
@@ -1824,6 +1876,8 @@ export const useStore = create<Store>((set, get) => ({
       console.warn("Could not load settings");
     }
     loadPlaylists();
+    loadMedia();
+    loadShow();
   },
 
   saveSettings: () => {
@@ -1868,7 +1922,6 @@ export const useStore = create<Store>((set, get) => ({
 function savePlaylists() {
   try {
     const { playlists } = useStore.getState();
-    // Persist track lists so playlists can be played back.
     const toPersist = playlists;
     localStorage.setItem(PLAYLISTS_KEY, JSON.stringify(toPersist));
   } catch {
@@ -1890,6 +1943,95 @@ function loadPlaylists() {
     }
   } catch {
     console.warn("Could not load playlists");
+  }
+}
+
+// ── Media & Show Persistence ────────────────────────────────────
+
+function saveMedia() {
+  try {
+    const { slides, videos } = useStore.getState();
+    // Only persist metadata (paths), not binary data
+    const toPersist = {
+      slides: slides.map(s => ({ id: s.id, name: s.name, path: s.path, src: s.src, type: s.type })),
+      videos: videos.map(v => ({ id: v.id, name: v.name, path: v.path, src: v.src, type: v.type, duration: v.duration })),
+    };
+    localStorage.setItem(MEDIA_STORAGE_KEY, JSON.stringify(toPersist));
+  } catch {
+    console.warn("Could not save media");
+  }
+}
+
+function loadMedia() {
+  try {
+    const saved = localStorage.getItem(MEDIA_STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      useStore.setState({
+        slides: parsed.slides || [],
+        videos: parsed.videos || [],
+      });
+    }
+  } catch {
+    console.warn("Could not load media");
+  }
+}
+
+function saveShow() {
+  try {
+    const { showQueue, showCurrentIndex } = useStore.getState();
+    localStorage.setItem(SHOW_STORAGE_KEY, JSON.stringify({ showQueue, showCurrentIndex }));
+  } catch {
+    console.warn("Could not save show");
+  }
+}
+
+function loadShow() {
+  try {
+    const saved = localStorage.getItem(SHOW_STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      useStore.setState({
+        showQueue: parsed.showQueue || [],
+        showCurrentIndex: parsed.showCurrentIndex ?? -1,
+      });
+    }
+  } catch {
+    console.warn("Could not load show");
+  }
+}
+
+function resetMedia() {
+  try {
+    localStorage.removeItem(MEDIA_STORAGE_KEY);
+    const { outputMode } = useStore.getState();
+    useStore.setState((s) => ({
+      slides: [],
+      videos: [],
+      activeSlideId: null,
+      activeVideoId: null,
+      showQueue: s.showQueue.filter((item) => item.type !== "image" && item.type !== "video"),
+      showCurrentIndex:
+        s.showCurrentIndex >= 0 && s.showQueue[s.showCurrentIndex] &&
+        (s.showQueue[s.showCurrentIndex].type === "image" || s.showQueue[s.showCurrentIndex].type === "video")
+          ? -1
+          : s.showCurrentIndex,
+      outputMode: outputMode === "image" || outputMode === "video" ? "blank" : s.outputMode,
+    }));
+    if (outputMode === "image" || outputMode === "video") {
+      void sendToOutput({ mode: "blank" });
+    }
+  } catch {
+    console.warn("Could not reset media");
+  }
+}
+
+function resetShow() {
+  try {
+    localStorage.removeItem(SHOW_STORAGE_KEY);
+    useStore.setState({ showQueue: [], showCurrentIndex: -1 });
+  } catch {
+    console.warn("Could not reset show");
   }
 }
 
@@ -1951,10 +2093,7 @@ function initMusicEngine() {
 
 // Auto-save settings on changes
 useStore.subscribe((state, prevState) => {
-  if (!prevState) {
-    state.saveSettings();
-    return;
-  }
+  if (!prevState) return;
 
   const changed =
     state.countdownLabel !== prevState.countdownLabel ||
@@ -1970,6 +2109,21 @@ useStore.subscribe((state, prevState) => {
     state.countdownDisplayAfterZeroSeconds !== prevState.countdownDisplayAfterZeroSeconds;
 
   if (changed) state.saveSettings();
+
+  // Auto-save playlists on change
+  if (state.playlists !== prevState.playlists) {
+    savePlaylists();
+  }
+
+  // Auto-save media on change
+  if (state.slides !== prevState.slides || state.videos !== prevState.videos) {
+    saveMedia();
+  }
+
+  // Auto-save show on change
+  if (state.showQueue !== prevState.showQueue || state.showCurrentIndex !== prevState.showCurrentIndex) {
+    saveShow();
+  }
 });
 
 // Keep countdown output/audio in sync with global output selection.

@@ -53,7 +53,7 @@ export default function Header() {
             className="text-xs px-1.5 py-0.5 rounded"
             style={{ background: "#1f1f1f", color: "#666" }}
           >
-            v1.2.0
+            v1.3.0
           </span>
         </div>
 

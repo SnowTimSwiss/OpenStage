@@ -35,6 +35,8 @@ export default function MediaTab() {
   // Slides (images)
   const slides = useStore((s) => s.slides);
   const activeSlideId = useStore((s) => s.activeSlideId);
+  const outputMode = useStore((s) => s.outputMode);
+  const isBlackout = useStore((s) => s.isBlackout);
   const loadMedia = useStore((s) => s.loadMedia);
   const goLiveSlide = useStore((s) => s.goLiveSlide);
   const removeSlide = useStore((s) => s.removeSlide);
@@ -57,6 +59,8 @@ export default function MediaTab() {
   const outputMonitorIndices = useStore((s) => s.outputMonitorIndices);
   const outputWindowsOpen = useStore((s) => s.outputWindowsOpen);
   const toggleOutputMonitor = useStore((s) => s.toggleOutputMonitor);
+  const resetMedia = useStore((s) => s.resetMedia);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   // Drag & Drop State
   const dragIndex = useStore((s) => (s as any).dragIndex ?? -1);
@@ -225,6 +229,16 @@ export default function MediaTab() {
           >
             + Medien
           </button>
+          {(slides.length > 0 || videos.length > 0) && (
+            <button
+              onClick={() => setShowResetConfirm(true)}
+              className="text-xs px-3 py-1.5 rounded font-medium transition-colors"
+              style={{ background: "#2a0a0a", color: "#ef4444", border: "1px solid #333" }}
+              title="Alle Medien entfernen"
+            >
+              🗑️ Reset
+            </button>
+          )}
         </div>
       </div>
 
@@ -296,7 +310,7 @@ export default function MediaTab() {
                     <div className="px-4 pb-4">
                       <div className="grid grid-cols-4 gap-2">
                         {group.pages.map((page, i) => {
-                          const active = page.id === activeSlideId;
+                          const active = outputMode === "image" && !isBlackout && page.id === activeSlideId;
                           return (
                             <button
                               key={page.id}
@@ -372,7 +386,7 @@ export default function MediaTab() {
             </div>
             <div className="grid grid-cols-2 gap-3 mb-6">
               {videos.map((video) => {
-                const isActive = video.id === activeVideoId;
+                const isActive = outputMode === "video" && !isBlackout && video.id === activeVideoId;
                 return (
                   <div
                     key={video.id}
@@ -449,7 +463,7 @@ export default function MediaTab() {
             </div>
             <div className="grid grid-cols-3 gap-3">
               {slides.map((slide, i) => {
-                const active = slide.id === activeSlideId;
+                const active = outputMode === "image" && !isBlackout && slide.id === activeSlideId;
                 return (
                   <div
                     key={slide.id}
@@ -657,6 +671,41 @@ export default function MediaTab() {
                   Tastatur: ←/→, PageUp/PageDown, Space, ESC
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showResetConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={() => setShowResetConfirm(false)}>
+          <div
+            className="w-[400px] rounded-xl overflow-hidden"
+            style={{ background: "#1a1a1a", border: "1px solid #333" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-3 border-b" style={{ borderColor: "#333" }}>
+              <h3 className="text-sm font-semibold text-white">Alle Medien entfernen?</h3>
+            </div>
+            <div className="p-4">
+              <p className="text-sm" style={{ color: "#ccc" }}>
+                Dies entfernt alle Bilder und Videos aus der Bibliothek. Diese Aktion kann nicht rückgängig gemacht werden.
+              </p>
+            </div>
+            <div className="px-4 py-3 border-t flex items-center justify-end gap-2" style={{ borderColor: "#333" }}>
+              <button
+                onClick={() => setShowResetConfirm(false)}
+                className="text-xs px-4 py-2 rounded font-medium"
+                style={{ background: "#2a2a2a", color: "#888" }}
+              >
+                Abbrechen
+              </button>
+              <button
+                onClick={() => { resetMedia(); setShowResetConfirm(false); }}
+                className="text-xs px-4 py-2 rounded font-medium"
+                style={{ background: "#ef4444", color: "white" }}
+              >
+                Entfernen
+              </button>
             </div>
           </div>
         </div>
