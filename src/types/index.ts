@@ -87,7 +87,7 @@ export interface OutputPayload {
   image?: { src: string };
   html?: { content: string };
   video?: { src: string; playing?: boolean; startTime?: number; endTime?: number };
-  song?: { text: string; title: string; index: number; total: number };
+  song?: { text: string; title: string; artist?: string; index: number; total: number; backgroundImage?: string | null };
   countdown?: {
     remaining: number;
     label: string;

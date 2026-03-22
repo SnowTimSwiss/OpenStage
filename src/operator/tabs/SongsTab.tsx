@@ -4,6 +4,7 @@ import type { Song, SongSlide, RepositorySong } from "../../types";
 import { save as saveFile, open as openFile } from "@tauri-apps/plugin-dialog";
 import { writeFile, readFile } from "@tauri-apps/plugin-fs";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { convertFileSrc } from "@tauri-apps/api/core";
 
 type View = "list" | "editor" | "live";
 const SONGS_REPOSITORY_URL = "https://github.com/SnowTimSwiss/OpenStage-songs";
@@ -18,6 +19,7 @@ export default function SongsTab() {
   const songs = useStore((s) => s.songs);
   const activeSongId = useStore((s) => s.activeSongId);
   const activeSongSlide = useStore((s) => s.activeSongSlide);
+  const songBackgroundImage = useStore((s) => s.songBackgroundImage);
   const addSong = useStore((s) => s.addSong);
   const updateSong = useStore((s) => s.updateSong);
   const removeSong = useStore((s) => s.removeSong);
@@ -25,6 +27,7 @@ export default function SongsTab() {
   const goLiveSongSlide = useStore((s) => s.goLiveSongSlide);
   const nextSongSlide = useStore((s) => s.nextSongSlide);
   const prevSongSlide = useStore((s) => s.prevSongSlide);
+  const setSongBackgroundImage = useStore((s) => s.setSongBackgroundImage);
 
   // GitHub Repository functions
   const fetchRepositorySongs = useStore((s) => s.fetchRepositorySongs);
@@ -157,6 +160,26 @@ export default function SongsTab() {
     void loadRepositorySongs();
   }
 
+  async function handleSetBackgroundImage() {
+    try {
+      const files = await openFile({
+        multiple: false,
+        filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }],
+      });
+      if (!files) return;
+      const path = files as string;
+      const src = convertFileSrc(path);
+      setSongBackgroundImage(src);
+    } catch (err) {
+      console.error("Failed to set background image:", err);
+      showMessage("Fehler", "Hintergrundbild konnte nicht geladen werden", "danger");
+    }
+  }
+
+  function handleClearBackgroundImage() {
+    setSongBackgroundImage(null);
+  }
+
   // ── EDITOR ────────────────────────────────────────────────────────────────
   if (view === "editor" && editingSong) {
     return <SongEditor
@@ -250,6 +273,24 @@ export default function SongsTab() {
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-white">Lieder</h2>
           <div className="flex gap-2">
+            <button
+              onClick={handleSetBackgroundImage}
+              className="text-xs px-3 py-1.5 rounded font-medium"
+              style={{ background: songBackgroundImage ? "#22c55e20" : "#1f1f1f", color: songBackgroundImage ? "#22c55e" : "#888", border: "1px solid #333" }}
+              title="Standard-Hintergrundbild für Lieder auswählen"
+            >
+              {songBackgroundImage ? "✓ Hintergrund" : "🖼 Hintergrund"}
+            </button>
+            {songBackgroundImage && (
+              <button
+                onClick={handleClearBackgroundImage}
+                className="text-xs px-3 py-1.5 rounded font-medium"
+                style={{ background: "#1f1f1f", color: "#ef4444", border: "1px solid #333" }}
+                title="Hintergrundbild entfernen"
+              >
+                ✕ Entfernen
+              </button>
+            )}
             <button
               onClick={openRepositoryModal}
               className="text-xs px-3 py-1.5 rounded font-medium"

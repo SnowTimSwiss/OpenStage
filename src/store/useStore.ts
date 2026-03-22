@@ -475,6 +475,8 @@ interface Store {
   songs: Song[];
   activeSongId: string | null;
   activeSongSlide: number;
+  songBackgroundImage: string | null; // Standard-Hintergrundbild für Lieder
+  setSongBackgroundImage: (src: string | null) => void;
   addSong: (song: Omit<Song, "id">) => void;
   updateSong: (id: string, song: Omit<Song, "id">) => void;
   removeSong: (id: string) => void;
@@ -847,6 +849,9 @@ export const useStore = create<Store>((set, get) => ({
   songs: [],
   activeSongId: null,
   activeSongSlide: 0,
+  songBackgroundImage: null,
+
+  setSongBackgroundImage: (src) => set({ songBackgroundImage: src }),
 
   addSong: (song) =>
     set((s) => ({ songs: [...s.songs, { ...song, id: crypto.randomUUID() }] })),
@@ -864,6 +869,7 @@ export const useStore = create<Store>((set, get) => ({
 
   goLiveSongSlide: (songId, index) => {
     const song = get().songs.find((s) => s.id === songId);
+    const songBackgroundImage = get().songBackgroundImage;
     if (!song || !song.slides[index]) return;
     set({ activeSongId: songId, activeSongSlide: index, outputMode: "song", isBlackout: false });
     sendToOutput({
@@ -871,6 +877,8 @@ export const useStore = create<Store>((set, get) => ({
       song: {
         text: song.slides[index].text,
         title: song.title,
+        artist: song.artist,
+        backgroundImage: songBackgroundImage,
         index,
         total: song.slides.length,
       },
@@ -1870,6 +1878,7 @@ export const useStore = create<Store>((set, get) => ({
           countdownBackgroundMusicFullVolumeMinutes: normalizeMinutes(parsed.countdownBackgroundMusicFullVolumeMinutes, 2),
           countdownDisplayAfterZeroSeconds: parsed.countdownDisplayAfterZeroSeconds ?? 10,
           outputMonitorIndices: parsed.outputMonitorIndices ?? [],
+          songBackgroundImage: parsed.songBackgroundImage ?? null,
         });
       }
     } catch {
@@ -1894,6 +1903,7 @@ export const useStore = create<Store>((set, get) => ({
         countdownBackgroundMusicFullVolumeMinutes,
         countdownDisplayAfterZeroSeconds,
         outputMonitorIndices,
+        songBackgroundImage,
       } = get();
       localStorage.setItem(
         STORAGE_KEY,
@@ -1909,6 +1919,7 @@ export const useStore = create<Store>((set, get) => ({
           countdownBackgroundMusicFullVolumeMinutes,
           countdownDisplayAfterZeroSeconds,
           outputMonitorIndices,
+          songBackgroundImage,
         })
       );
     } catch {
@@ -2106,7 +2117,8 @@ useStore.subscribe((state, prevState) => {
     state.countdownBackgroundMusicStartVolumePercent !== prevState.countdownBackgroundMusicStartVolumePercent ||
     state.countdownBackgroundMusicFadeInStartMinutes !== prevState.countdownBackgroundMusicFadeInStartMinutes ||
     state.countdownBackgroundMusicFullVolumeMinutes !== prevState.countdownBackgroundMusicFullVolumeMinutes ||
-    state.countdownDisplayAfterZeroSeconds !== prevState.countdownDisplayAfterZeroSeconds;
+    state.countdownDisplayAfterZeroSeconds !== prevState.countdownDisplayAfterZeroSeconds ||
+    state.songBackgroundImage !== prevState.songBackgroundImage;
 
   if (changed) state.saveSettings();
 

@@ -94,6 +94,7 @@ function PreviewPanel() {
     pdfGroups.flatMap((g) => g.pages).find((s) => s.id === activeSlideId);
   const activeVideo = videos.find((v) => v.id === activeVideoId);
   const currentMusic = music[musicIndex];
+  const songBackgroundImage = useStore((s) => s.songBackgroundImage);
 
   const duration = musicDuration || 0;
   const currentTime = Math.min(musicCurrentTime, duration || musicCurrentTime);
@@ -112,6 +113,8 @@ function PreviewPanel() {
           song: {
             text: slide.text,
             title: activeSong.title,
+            artist: activeSong.artist,
+            backgroundImage: songBackgroundImage,
             index: activeSongSlide,
             total: activeSong.slides.length,
           },
@@ -143,6 +146,7 @@ function PreviewPanel() {
     countdownLabel,
     countdownTheme,
     activeVideo,
+    songBackgroundImage,
   ]);
 
   return (
