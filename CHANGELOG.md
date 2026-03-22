@@ -2,6 +2,19 @@
 
 Alle wesentlichen Änderungen an OpenStage werden in dieser Datei dokumentiert.
 
+## [1.3.1] - 2026-03-22
+
+### Hinzugefügt
+- **Ganzes Lied anzeigen** – Alle Folien eines Liedes auf einmal
+  - Toggle "Ganzes Lied" im Songs-Tab (global für alle Lieder)
+  - Alle Folien werden kombiniert angezeigt (mit \n\n getrennt)
+  - Intelligente 2-Spalten-Ansicht für bessere Lesbarkeit
+  - Automatische Schriftgrößen-Anpassung bei aktiviertem Modus
+  - Navigation springt bei "Ganzes Lied" direkt zwischen Items
+  - Vorschau im Songs-Tab zeigt gleiches Layout wie Output
+  - Hintergrundbild-Unterstützung auch für ganze Lieder
+  - Funktioniert im Songs-Tab und Show-Modus
+
 ## [1.3.0] - 2026-03-22
 
 ### Hinzugefügt

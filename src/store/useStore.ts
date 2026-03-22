@@ -475,8 +475,10 @@ interface Store {
   songs: Song[];
   activeSongId: string | null;
   activeSongSlide: number;
+  showAllSongSlides: boolean; // Alle Folien eines Liedes auf einmal anzeigen
   songBackgroundImage: string | null; // Standard-Hintergrundbild für Lieder
   setSongBackgroundImage: (src: string | null) => void;
+  setShowAllSongSlides: (show: boolean) => void;
   addSong: (song: Omit<Song, "id">) => void;
   updateSong: (id: string, song: Omit<Song, "id">) => void;
   removeSong: (id: string) => void;
@@ -849,9 +851,12 @@ export const useStore = create<Store>((set, get) => ({
   songs: [],
   activeSongId: null,
   activeSongSlide: 0,
+  showAllSongSlides: false,
   songBackgroundImage: null,
 
   setSongBackgroundImage: (src) => set({ songBackgroundImage: src }),
+
+  setShowAllSongSlides: (show) => set({ showAllSongSlides: show }),
 
   addSong: (song) =>
     set((s) => ({ songs: [...s.songs, { ...song, id: crypto.randomUUID() }] })),
@@ -870,17 +875,25 @@ export const useStore = create<Store>((set, get) => ({
   goLiveSongSlide: (songId, index) => {
     const song = get().songs.find((s) => s.id === songId);
     const songBackgroundImage = get().songBackgroundImage;
+    const showAllSongSlides = get().showAllSongSlides;
     if (!song || !song.slides[index]) return;
     set({ activeSongId: songId, activeSongSlide: index, outputMode: "song", isBlackout: false });
+    
+    // Wenn alle Folien angezeigt werden sollen, kombiniere alle Texte
+    const text = showAllSongSlides
+      ? song.slides.map((slide) => slide.text).join("\n\n")
+      : song.slides[index].text;
+    
     sendToOutput({
       mode: "song",
       song: {
-        text: song.slides[index].text,
+        text,
         title: song.title,
         artist: song.artist,
         backgroundImage: songBackgroundImage,
         index,
         total: song.slides.length,
+        allSlides: showAllSongSlides,
       },
     });
   },
@@ -1780,10 +1793,16 @@ export const useStore = create<Store>((set, get) => ({
 
   showNextSlide: () => {
     const state = get();
-    const { showQueue, showCurrentIndex, songs, pdfGroups } = state;
+    const { showQueue, showCurrentIndex, songs, pdfGroups, showAllSongSlides } = state;
     if (showQueue.length === 0 || showCurrentIndex < 0) return;
 
     const currentItem = showQueue[showCurrentIndex];
+
+    // Wenn alle Folien angezeigt werden, direkt zum nächsten Item springen
+    if (showAllSongSlides && currentItem.type === "song") {
+      state.showNext();
+      return;
+    }
 
     // For songs: increment slide index
     if (currentItem.type === "song" && currentItem.refId) {
@@ -1813,10 +1832,16 @@ export const useStore = create<Store>((set, get) => ({
 
   showPreviousSlide: () => {
     const state = get();
-    const { showQueue, showCurrentIndex, songs, pdfGroups } = state;
+    const { showQueue, showCurrentIndex, songs, pdfGroups, showAllSongSlides } = state;
     if (showQueue.length === 0 || showCurrentIndex < 0) return;
 
     const currentItem = showQueue[showCurrentIndex];
+
+    // Wenn alle Folien angezeigt werden, direkt zum vorherigen Item springen
+    if (showAllSongSlides && currentItem.type === "song") {
+      state.showPrevious();
+      return;
+    }
 
     // For songs: decrement slide index
     if (currentItem.type === "song" && currentItem.refId) {

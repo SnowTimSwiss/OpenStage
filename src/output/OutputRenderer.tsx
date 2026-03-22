@@ -112,6 +112,20 @@ export default function OutputRenderer({
   }
 
   if (mode === "song" && state.song) {
+    const isAllSlides = state.song.allSlides === true;
+    const songFontSizeValue = compact 
+      ? (isAllSlides ? "clamp(0.65rem, 1.3vw, 0.95rem)" : "clamp(0.75rem, 1.6vw, 1.15rem)")
+      : (isAllSlides ? "clamp(1.25rem, 3vw, 2.5rem)" : "clamp(2rem, 5vw, 5rem)");
+    
+    // Bei ganzen Liedern: Text in Spalten aufteilen für bessere Lesbarkeit
+    const gridColumnStyle = isAllSlides && !compact
+      ? {
+          columnCount: 2,
+          columnGap: "3rem",
+          textAlign: "center" as const,
+        }
+      : {};
+    
     return (
       <div
         className={`${rootClassName} bg-black flex flex-col items-center justify-center px-20 transition-opacity duration-300 relative`}
@@ -130,16 +144,17 @@ export default function OutputRenderer({
             background: state.song.backgroundImage ? "rgba(0,0,0,0.6)" : undefined,
           }}
         />
-        
+
         <div className="relative z-10 flex flex-col items-center justify-center w-full h-full">
           <p
-            className="text-white text-center leading-snug whitespace-pre-line"
+            className="text-white leading-snug whitespace-pre-line"
             style={{
-              fontSize: songFontSize,
+              fontSize: songFontSizeValue,
               fontFamily: "'Sora', sans-serif",
               fontWeight: 300,
               textShadow: "0 2px 20px rgba(0,0,0,0.8)",
               letterSpacing: "0.01em",
+              ...gridColumnStyle,
             }}
           >
             {state.song.text}

@@ -206,6 +206,7 @@ export default function ShowTab() {
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: "#252525" }}>
         <h2 className="text-sm font-semibold text-white">Show Mode</h2>
+        
         <div className="flex items-center gap-2">
           <span className="text-[10px]" style={{ color: "#555" }}>
             ← → Slides • ↑↓ Items
@@ -617,6 +618,8 @@ function buildOutputPayload(
   }
 ): OutputPayload {
   const { slides, videos, songs, pdfGroups, countdownRemaining, countdownLabel, countdownTheme, music, playlists } = data;
+  const showAllSongSlides = useStore.getState().showAllSongSlides;
+  const songBackgroundImage = useStore.getState().songBackgroundImage;
 
   switch (item.type) {
     case "image": {
@@ -631,15 +634,23 @@ function buildOutputPayload(
       const song = songs.find((s) => s.id === item.refId);
       if (!song) return { mode: "blank" };
       const slideIdx = item.slideIndex ?? 0;
-      const slide = song.slides[slideIdx];
-      if (!slide) return { mode: "blank" };
+      
+      // Wenn alle Folien angezeigt werden sollen, kombiniere alle Texte
+      const text = showAllSongSlides
+        ? song.slides.map((slide: any) => slide.text).join("\n\n")
+        : (song.slides[slideIdx]?.text ?? "");
+      
+      if (!text) return { mode: "blank" };
       return {
         mode: "song",
         song: {
-          text: slide.text,
+          text,
           title: song.title,
+          artist: song.artist,
           index: slideIdx,
           total: song.slides.length,
+          backgroundImage: songBackgroundImage,
+          allSlides: showAllSongSlides,
         },
       };
     }

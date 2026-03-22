@@ -19,6 +19,7 @@ export default function SongsTab() {
   const songs = useStore((s) => s.songs);
   const activeSongId = useStore((s) => s.activeSongId);
   const activeSongSlide = useStore((s) => s.activeSongSlide);
+  const showAllSongSlides = useStore((s) => s.showAllSongSlides);
   const songBackgroundImage = useStore((s) => s.songBackgroundImage);
   const addSong = useStore((s) => s.addSong);
   const updateSong = useStore((s) => s.updateSong);
@@ -28,6 +29,7 @@ export default function SongsTab() {
   const nextSongSlide = useStore((s) => s.nextSongSlide);
   const prevSongSlide = useStore((s) => s.prevSongSlide);
   const setSongBackgroundImage = useStore((s) => s.setSongBackgroundImage);
+  const setShowAllSongSlides = useStore((s) => s.setShowAllSongSlides);
 
   // GitHub Repository functions
   const fetchRepositorySongs = useStore((s) => s.fetchRepositorySongs);
@@ -203,65 +205,117 @@ export default function SongsTab() {
             ← Zurück
           </button>
           <h2 className="text-sm font-semibold text-white flex-1">{activeSong.title}</h2>
+          
+          {/* Toggle für ganzes Lied */}
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showAllSongSlides}
+              onChange={(e) => {
+                setShowAllSongSlides(e.target.checked);
+                // Wenn umgeschaltet wird, aktuelle Folie neu laden
+                if (activeSongId) {
+                  goLiveSongSlide(activeSongId, activeSongSlide);
+                }
+              }}
+              className="w-4 h-4 rounded"
+              style={{ accentColor: "#f97316" }}
+            />
+            <span className="text-xs text-gray-300">Ganzes Lied</span>
+          </label>
+          
           <span className="text-xs" style={{ color: "#555" }}>
             {activeSongSlide + 1} / {activeSong.slides.length}
           </span>
         </div>
 
         {/* Slide grid */}
-        <div className="flex-1 overflow-y-auto p-3 grid grid-cols-2 gap-2 content-start">
-          {activeSong.slides.map((slide, i) => {
-            const isActive = i === activeSongSlide && activeSongId === activeSong.id;
-            return (
-              <button
-                key={slide.id}
-                onClick={() => goLiveSongSlide(activeSong.id, i)}
-                className="text-left rounded-lg p-3 transition-all"
+        {showAllSongSlides ? (
+          /* Vorschau des ganzen Liedes - 2 Spalten wie im Output */
+          <div className="flex-1 overflow-y-auto p-4">
+            <div className="rounded-lg p-6" style={{ background: "#141414", border: "1px solid #f9731640" }}>
+              <div className="text-xs font-medium mb-4 text-center" style={{ color: "#f97316" }}>
+                📄 Vorschau - Ganzes Lied
+              </div>
+              <div
+                className="text-white leading-snug whitespace-pre-line"
                 style={{
-                  background: isActive ? "#f9731615" : "#141414",
-                  border: isActive ? "1px solid #f97316" : "1px solid #222",
-                  color: isActive ? "#f97316" : "#ccc",
+                  columnCount: 2,
+                  columnGap: "2rem",
+                  textAlign: "center",
+                  fontSize: "clamp(0.9rem, 2vw, 1.5rem)",
+                  fontFamily: "'Sora', sans-serif",
+                  fontWeight: 300,
+                  letterSpacing: "0.01em",
                 }}
               >
-                {slide.label && (
-                  <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: isActive ? "#f97316aa" : "#444" }}>
-                    {slide.label}
-                  </div>
-                )}
-                <div className="text-xs leading-relaxed whitespace-pre-line">{slide.text || <span style={{ color: "#444" }}>(leer)</span>}</div>
-                {slide.notes && (
-                  <div className="mt-2 pt-2 border-t" style={{ borderColor: "#222" }}>
-                    <div className="text-[9px] uppercase tracking-wider mb-0.5" style={{ color: "#555" }}>
-                      📝 Notizen
+                {activeSong.slides.map((slide, i) => (
+                  <span key={slide.id}>
+                    {slide.text}
+                    {i < activeSong.slides.length - 1 && "\n\n"}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* Einzelne Folien */
+          <div className="flex-1 overflow-y-auto p-3 grid grid-cols-2 gap-2 content-start">
+            {activeSong.slides.map((slide, i) => {
+              const isActive = i === activeSongSlide && activeSongId === activeSong.id;
+              return (
+                <button
+                  key={slide.id}
+                  onClick={() => goLiveSongSlide(activeSong.id, i)}
+                  className="text-left rounded-lg p-3 transition-all"
+                  style={{
+                    background: isActive ? "#f9731615" : "#141414",
+                    border: isActive ? "1px solid #f97316" : "1px solid #222",
+                    color: isActive ? "#f97316" : "#ccc",
+                  }}
+                >
+                  {slide.label && (
+                    <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: isActive ? "#f97316aa" : "#444" }}>
+                      {slide.label}
                     </div>
-                    <div className="text-[10px] leading-relaxed" style={{ color: "#666" }}>{slide.notes}</div>
-                  </div>
-                )}
-                {isActive && (
-                  <div className="mt-2 text-[10px] font-bold" style={{ color: "#f97316" }}>● LIVE</div>
-                )}
-              </button>
-            );
-          })}
-        </div>
+                  )}
+                  <div className="text-xs leading-relaxed whitespace-pre-line">{slide.text || <span style={{ color: "#444" }}>(leer)</span>}</div>
+                  {slide.notes && (
+                    <div className="mt-2 pt-2 border-t" style={{ borderColor: "#222" }}>
+                      <div className="text-[9px] uppercase tracking-wider mb-0.5" style={{ color: "#555" }}>
+                        📝 Notizen
+                      </div>
+                      <div className="text-[10px] leading-relaxed" style={{ color: "#666" }}>{slide.notes}</div>
+                    </div>
+                  )}
+                  {isActive && (
+                    <div className="mt-2 text-[10px] font-bold" style={{ color: "#f97316" }}>● LIVE</div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
-        {/* Arrow controls */}
-        <div className="flex gap-2 p-3 border-t" style={{ borderColor: "#252525" }}>
-          <button
-            onClick={prevSongSlide}
-            className="flex-1 py-2 rounded font-bold text-sm"
-            style={{ background: "#1a1a1a", color: "#888", border: "1px solid #2a2a2a" }}
-          >
-            ◀ Zurück
-          </button>
-          <button
-            onClick={nextSongSlide}
-            className="flex-1 py-2 rounded font-bold text-sm"
-            style={{ background: "#f97316", color: "white" }}
-          >
-            Weiter ▶
-          </button>
-        </div>
+        {/* Arrow controls - nur im Einzel Folien-Modus */}
+        {!showAllSongSlides && (
+          <div className="flex gap-2 p-3 border-t" style={{ borderColor: "#252525" }}>
+            <button
+              onClick={prevSongSlide}
+              className="flex-1 py-2 rounded font-bold text-sm"
+              style={{ background: "#1a1a1a", color: "#888", border: "1px solid #2a2a2a" }}
+            >
+              ◀ Zurück
+            </button>
+            <button
+              onClick={nextSongSlide}
+              className="flex-1 py-2 rounded font-bold text-sm"
+              style={{ background: "#f97316", color: "white" }}
+            >
+              Weiter ▶
+            </button>
+          </div>
+        )}
       </div>
     );
   }
