@@ -94,6 +94,8 @@ function PreviewPanel() {
   const musicCurrentTime = useStore((s) => s.musicCurrentTime);
   const musicDuration = useStore((s) => s.musicDuration);
   const musicVolume = useStore((s) => s.musicVolume);
+  const showAllSongSlides = useStore((s) => s.showAllSongSlides);
+  const songBackgroundImage = useStore((s) => s.songBackgroundImage);
   const setMusicPlaying = useStore((s) => s.setMusicPlaying);
   const playNextMusic = useStore((s) => s.playNextMusic);
   const playPrevMusic = useStore((s) => s.playPrevMusic);
@@ -107,7 +109,11 @@ function PreviewPanel() {
     pdfGroups.flatMap((g) => g.pages).find((s) => s.id === activeSlideId);
   const activeVideo = videos.find((v) => v.id === activeVideoId);
   const currentMusic = music[musicIndex];
-  const activeSongPresentation = activeSong ? getSongPresentation(activeSong, activeSongSlide) : null;
+  const previewSong = useMemo(
+    () => (activeSong ? (showAllSongSlides ? { ...activeSong, combineSlides: true } : activeSong) : null),
+    [activeSong, showAllSongSlides]
+  );
+  const activeSongPresentation = previewSong ? getSongPresentation(previewSong, activeSongSlide) : null;
 
   const duration = musicDuration || 0;
   const currentTime = Math.min(musicCurrentTime, duration || musicCurrentTime);
@@ -118,16 +124,19 @@ function PreviewPanel() {
     if ((outputMode === "image" || outputMode === "html") && activeSlide) {
       return { mode: "image", image: { src: activeSlide.src } };
     }
-    if (outputMode === "song" && activeSong && activeSongPresentation && activeSongPresentation.total > 0) {
-        return {
-          mode: "song",
-          song: {
-            text: activeSongPresentation.text,
-            title: activeSong.title,
-            index: activeSongPresentation.index,
-            total: activeSongPresentation.total,
-          },
-        };
+    if (outputMode === "song" && previewSong && activeSongPresentation && activeSongPresentation.total > 0) {
+      return {
+        mode: "song",
+        song: {
+          text: activeSongPresentation.text,
+          title: previewSong.title,
+          artist: previewSong.artist,
+          backgroundImage: songBackgroundImage,
+          index: activeSongPresentation.index,
+          total: activeSongPresentation.total,
+          allSlides: Boolean(previewSong.combineSlides),
+        },
+      };
     }
     if (outputMode === "countdown") {
       return {
@@ -148,13 +157,13 @@ function PreviewPanel() {
     isBlackout,
     outputMode,
     activeSlide,
-    activeSong,
-    activeSongSlide,
+    previewSong,
     activeSongPresentation,
     countdownRemaining,
     countdownLabel,
     countdownTheme,
     activeVideo,
+    songBackgroundImage,
   ]);
 
   return (

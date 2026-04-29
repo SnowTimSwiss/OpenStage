@@ -78,7 +78,8 @@ export type OutputMode =
   | "html"
   | "video"
   | "song"
-  | "countdown";
+  | "countdown"
+  | "music";
 
 export type CountdownTheme = "default" | "minimal" | "bold";
 
@@ -87,14 +88,20 @@ export interface OutputPayload {
   image?: { src: string };
   html?: { content: string };
   video?: { src: string; playing?: boolean; startTime?: number; endTime?: number };
-  song?: { text: string; title: string; index: number; total: number };
-  countdown?: { 
-    remaining: number; 
-    label: string; 
-    running: boolean; 
-    theme?: CountdownTheme; 
+  song?: { text: string; title: string; artist?: string; index: number; total: number; backgroundImage?: string | null; allSlides?: boolean };
+  countdown?: {
+    remaining: number;
+    label: string;
+    running: boolean;
+    theme?: CountdownTheme;
     targetTime?: string | null;
     isFadingOut?: boolean;
+  };
+  music?: {
+    src: string;
+    playing?: boolean;
+    trackName?: string;
+    artist?: string;
   };
 }
 
@@ -112,7 +119,7 @@ export type TransitionType = "none" | "fade" | "slide" | "zoom";
 
 // ── Show Mode ────────────────────────────────────────────────────────────────
 
-export type ShowItemType = "image" | "video" | "song" | "countdown" | "pdf";
+export type ShowItemType = "image" | "video" | "song" | "countdown" | "pdf" | "music" | "playlist";
 
 export interface ShowItem {
   id: string;
@@ -120,4 +127,49 @@ export interface ShowItem {
   refId?: string; // reference to existing media/song/pdf group
   label: string;
   slideIndex?: number; // for songs/pdf: current page number
+  musicTrackId?: string; // for music: specific track to play
+  playlistId?: string; // for playlist: which playlist to play
+  showMusicOverlay?: boolean; // show title/artist on output (default: true)
+}
+
+// ── GitHub Repository ────────────────────────────────────────────────────────
+
+export interface GitHubSongFile {
+  name: string;
+  path: string;
+  sha: string;
+  size: number;
+  url: string;
+  html_url: string;
+  git_url: string;
+  download_url: string;
+  type: "file";
+  _links: {
+    self: string;
+    git: string;
+    html: string;
+  };
+}
+
+export interface GitHubRepoContent {
+  name: string;
+  path: string;
+  sha: string;
+  size: number;
+  url: string;
+  html_url: string;
+  download_url: string | null;
+  type: "file" | "dir";
+}
+
+export interface RepositorySong {
+  name: string;
+  path: string;
+  sha: string;
+  apiUrl: string;
+  downloadUrl: string;
+  songData?: Song; // Loaded song data
+  isLocal?: boolean; // Already downloaded
+  localVersion?: string; // Local SHA if exists
+  needsUpdate?: boolean; // Remote is newer
 }

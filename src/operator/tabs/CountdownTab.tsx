@@ -46,7 +46,6 @@ export default function CountdownTab() {
   const activePlaylistId = useStore((s) => s.activePlaylistId);
   const activePlaylist = activePlaylistId ? playlists.find((p) => p.id === activePlaylistId) : null;
   const backgroundPlaylist = backgroundPlaylistId ? playlists.find((p) => p.id === backgroundPlaylistId) : null;
-  const backgroundPlaylistArt = backgroundPlaylist?.coverArt ?? backgroundPlaylist?.tracks[0]?.albumArt ?? null;
   const playlistOptions = playlists.map((p) => ({
     id: p.id,
     title: `${p.name} (${p.tracks.length})`,
@@ -318,90 +317,6 @@ export default function CountdownTab() {
                 </p>
               </div>
 
-              <div
-                className="rounded-xl p-4 border"
-                style={{
-                  background: "#0b0b0b",
-                  borderColor: "#232323",
-                  opacity: 0.55,
-                  filter: "grayscale(1)",
-                }}
-              >
-                <div className="text-[10px] uppercase tracking-widest font-medium" style={{ color: "#666" }}>
-                  Player Widget
-                </div>
-
-                <div className="mt-4 flex items-center gap-3">
-                  <div
-                    className="w-12 h-12 rounded-lg flex items-center justify-center shrink-0 overflow-hidden"
-                    style={{ background: "#1a1a1a" }}
-                  >
-                    {backgroundPlaylistArt ? (
-                      <img src={backgroundPlaylistArt} alt="" className="w-full h-full object-cover" />
-                    ) : (
-                      <span className="text-lg">🎵</span>
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium truncate" style={{ color: "#ddd" }}>
-                      {backgroundPlaylist ? backgroundPlaylist.name : "Keine Hintergrundmusik"}
-                    </div>
-                    <div className="text-[11px] mt-0.5" style={{ color: "#666" }}>
-                      {backgroundPlaylist
-                        ? `${backgroundPlaylist.tracks.length} Tracks · Lokal`
-                        : "Nur Vorschau, hier kann nichts geändert werden"}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-4 flex items-center justify-center gap-2">
-                  <button
-                    disabled
-                    className="w-9 h-9 rounded-full flex items-center justify-center text-sm cursor-not-allowed"
-                    style={{ background: "#1a1a1a", color: "#666", border: "1px solid #222" }}
-                  >
-                    ⏮
-                  </button>
-                  <button
-                    disabled
-                    className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold cursor-not-allowed"
-                    style={{ background: "#1f1f1f", color: "#777", border: "1px solid #262626" }}
-                  >
-                    ▶
-                  </button>
-                  <button
-                    disabled
-                    className="w-9 h-9 rounded-full flex items-center justify-center text-sm cursor-not-allowed"
-                    style={{ background: "#1a1a1a", color: "#666", border: "1px solid #222" }}
-                  >
-                    ⏭
-                  </button>
-                </div>
-
-                <div className="mt-4">
-                  <div className="flex items-center justify-between text-[11px] mb-1" style={{ color: "#666" }}>
-                    <span>Lautstärke</span>
-                    <span>{Math.round(bgVolume * 100)}%</span>
-                  </div>
-                  <input type="range" min={0} max={1} step={0.01} value={bgVolume} disabled className="w-full" />
-                </div>
-
-                <div className="mt-4">
-                  <div className="h-1.5 rounded-full bg-[#1a1a1a] overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-[#666]"
-                      style={{ width: backgroundPlaylist ? "42%" : "0%" }}
-                    />
-                  </div>
-                  <p className="text-[11px] mt-2" style={{ color: "#555" }}>
-                    Gleiche Vorschau wie im Musik-Player, aber im Countdown gesperrt.
-                  </p>
-                </div>
-
-                <p className="text-[11px] mt-3" style={{ color: "#555" }}>
-                  Steuerung bleibt im Countdown gesperrt. Hier siehst du nur, welche Playlist aktiv ist.
-                </p>
-              </div>
             </div>
           )}
         </div>

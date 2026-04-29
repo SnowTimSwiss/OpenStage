@@ -1,24 +1,35 @@
 import { create } from "zustand";
+import { listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   sendToOutput,
+  getLastOutputPayload,
   openOutputWindowForMonitor,
   assignOutputWindowToMonitor,
   closeOutputWindowForMonitor,
   closeAllOutputWindows as closeAllOutputFn,
+  OUTPUT_READY_EVENT,
 } from "../lib/events";
 import { secondsUntilTargetTime } from "../lib/formatTime";
 import { getSongEffectiveSlideCount, getSongPresentation } from "../lib/songPresentation";
+import {
+  fetchRepoContents,
+  downloadSong,
+  processRepositoryContents,
+} from "../lib/github";
 import type {
   Song, MediaItem, MusicItem, Playlist, MusicSource,
   Monitor, TabId, OutputMode, PdfGroup, CountdownTheme, ShowItem,
+  RepositorySong,
 } from "../types";
 
 const STORAGE_KEY = "openstage-settings-v1";
 const PLAYLISTS_KEY = "openstage-playlists-v1";
 const LIBRARY_KEY = "openstage-library-v1";
+const MEDIA_STORAGE_KEY = "openstage-media-v1";
+const SHOW_STORAGE_KEY = "openstage-show-v1";
 
 let countdownInterval: ReturnType<typeof setInterval> | null = null;
 let musicAudio: HTMLAudioElement | null = null;
@@ -33,6 +44,7 @@ let countdownBgStarting = false;
 let countdownBgStartOffsetSeconds = 0;
 let countdownEndTime: number | null = null;
 let countdownFadeOutTimeout: ReturnType<typeof setTimeout> | null = null;
+let outputReadyListenerInitialized = false;
 
 function formatUnknownError(err: unknown): string {
   if (err instanceof Error) return `${err.name}: ${err.message}`;
@@ -56,6 +68,15 @@ function isOutputWebview(): boolean {
   } catch {
     return false;
   }
+}
+
+function initOutputReplayListener() {
+  if (outputReadyListenerInitialized || isOutputWebview() || typeof window === "undefined") return;
+  outputReadyListenerInitialized = true;
+
+  void listen(OUTPUT_READY_EVENT, () => {
+    void sendToOutput(getLastOutputPayload());
+  });
 }
 
 function ensureMusicAudio(): HTMLAudioElement | null {
@@ -500,6 +521,10 @@ interface Store {
   songs: Song[];
   activeSongId: string | null;
   activeSongSlide: number;
+  showAllSongSlides: boolean; // Alle Folien eines Liedes auf einmal anzeigen
+  songBackgroundImage: string | null; // Standard-Hintergrundbild für Lieder
+  setSongBackgroundImage: (src: string | null) => void;
+  setShowAllSongSlides: (show: boolean) => void;
   addSong: (song: Omit<Song, "id">) => void;
   updateSong: (id: string, song: Omit<Song, "id">) => void;
   removeSong: (id: string) => void;
@@ -507,6 +532,12 @@ interface Store {
   goLiveSongSlide: (songId: string, index: number) => void;
   nextSongSlide: () => void;
   prevSongSlide: () => void;
+
+  // ── GitHub Repository ─────────────────────────────────────────────────
+  githubRepoOwner: string;
+  githubRepoName: string;
+  fetchRepositorySongs: () => Promise<RepositorySong[]>;
+  downloadRepositorySong: (song: RepositorySong) => Promise<Song>;
 
   // ── Countdown ──────────────────────────────────────────────────────────
   countdownRemaining: number;
@@ -605,6 +636,11 @@ interface Store {
   showPreviousSlide: () => void; // previous slide within current item
   reorderShowQueue: (fromIndex: number, toIndex: number) => void;
   clearShowQueue: () => void;
+  advanceShowOnMusicEnd: () => void; // advance show when music track ends
+
+  // ── Persist & Reset ─────────────────────────────────────────────────────
+  resetMedia: () => void;
+  resetShow: () => void;
 
   // ── Persist settings ────────────────────────────────────────────────────
   loadSettings: () => void;
@@ -861,6 +897,12 @@ export const useStore = create<Store>((set, get) => ({
   songs: [],
   activeSongId: null,
   activeSongSlide: 0,
+  showAllSongSlides: false,
+  songBackgroundImage: null,
+
+  setSongBackgroundImage: (src) => set({ songBackgroundImage: src }),
+
+  setShowAllSongSlides: (show) => set({ showAllSongSlides: show }),
 
   addSong: (song) =>
     set((s) => ({
@@ -895,32 +937,40 @@ export const useStore = create<Store>((set, get) => ({
 
   goLiveSongSlide: (songId, index) => {
     const song = get().songs.find((s) => s.id === songId);
+    const songBackgroundImage = get().songBackgroundImage;
+    const showAllSongSlides = get().showAllSongSlides;
     if (!song || song.slides.length === 0) return;
 
-    const presentation = getSongPresentation(song, index);
+    const effectiveSong = showAllSongSlides ? { ...song, combineSlides: true } : song;
+    const presentation = getSongPresentation(effectiveSong, index);
     set({
       activeSongId: songId,
       activeSongSlide: presentation.index,
       outputMode: "song",
       isBlackout: false,
     });
+
     sendToOutput({
       mode: "song",
       song: {
         text: presentation.text,
         title: song.title,
+        artist: song.artist,
+        backgroundImage: songBackgroundImage,
         index: presentation.index,
         total: presentation.total,
+        allSlides: Boolean(effectiveSong.combineSlides),
       },
     });
   },
 
   nextSongSlide: () => {
-    const { activeSongId, activeSongSlide, songs, goLiveSongSlide } = get();
+    const { activeSongId, activeSongSlide, songs, goLiveSongSlide, showAllSongSlides } = get();
     if (!activeSongId) return;
     const song = songs.find((s) => s.id === activeSongId);
     if (!song) return;
-    const next = Math.min(activeSongSlide + 1, Math.max(0, getSongEffectiveSlideCount(song) - 1));
+    const effectiveSong = showAllSongSlides ? { ...song, combineSlides: true } : song;
+    const next = Math.min(activeSongSlide + 1, Math.max(0, getSongEffectiveSlideCount(effectiveSong) - 1));
     goLiveSongSlide(activeSongId, next);
   },
 
@@ -931,6 +981,33 @@ export const useStore = create<Store>((set, get) => ({
     if (!song) return;
     const prev = Math.max(activeSongSlide - 1, 0);
     goLiveSongSlide(activeSongId, prev);
+  },
+
+  // ── GitHub Repository ─────────────────────────────────────────────────
+  githubRepoOwner: "SnowTimSwiss",
+  githubRepoName: "OpenStage-songs",
+
+  fetchRepositorySongs: async () => {
+    const { songs: localSongs } = get();
+    try {
+      const contents = await fetchRepoContents();
+      return await processRepositoryContents(contents, localSongs);
+    } catch (err) {
+      console.error("Failed to fetch repository songs:", err);
+      throw err;
+    }
+  },
+
+  downloadRepositorySong: async (repositorySong: RepositorySong) => {
+    const { addSong } = get();
+    try {
+      const songData = await downloadSong(repositorySong.apiUrl);
+      addSong(songData);
+      return songData;
+    } catch (err) {
+      console.error("Failed to download song:", err);
+      throw err;
+    }
   },
 
   // ── Countdown ──────────────────────────────────────────────────────────
@@ -1403,8 +1480,40 @@ export const useStore = create<Store>((set, get) => ({
   toggleMusicPlaying: () => get().setMusicPlaying(!get().musicPlaying),
 
   playNextMusic: () => {
-    const { music, musicIndex, setMusicIndex, setMusicPlaying } = get();
+    const { music, musicIndex, setMusicIndex, setMusicPlaying, showQueue, advanceShowOnMusicEnd } = get();
     if (music.length === 0) return;
+    
+    // Check if we're in a playlist context (for show mode)
+    // If current music is part of a playlist item in show, handle playlist advancement
+    const { playlists } = get();
+    const currentShowItem = showQueue.length > 0 ? showQueue[get().showCurrentIndex] : null;
+    
+    // If we're in show mode with a playlist item, check if we should advance show
+    if (currentShowItem && currentShowItem.type === "playlist" && currentShowItem.playlistId) {
+      const playlist = playlists.find((p) => p.id === currentShowItem.playlistId);
+      if (playlist) {
+        const currentTrackIndex = playlist.tracks.findIndex((t) => t.id === music[musicIndex]?.id);
+        const nextTrackIndex = currentTrackIndex + 1;
+        
+        // If there's a next track in the playlist, play it
+        if (nextTrackIndex < playlist.tracks.length) {
+          const nextTrack = playlist.tracks[nextTrackIndex];
+          const nextTrackGlobalIndex = music.findIndex((m) => m.id === nextTrack.id);
+          if (nextTrackGlobalIndex >= 0) {
+            setMusicIndex(nextTrackGlobalIndex);
+            set({ musicCurrentTime: 0 });
+            setMusicPlaying(true);
+            return;
+          }
+        }
+        
+        // Last track in playlist - advance show
+        advanceShowOnMusicEnd();
+        return;
+      }
+    }
+    
+    // Default behavior: cycle through all music
     let next = musicIndex;
     for (let i = 0; i < music.length; i++) {
       next = (next + 1) % music.length;
@@ -1653,33 +1762,128 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   showNext: () => {
-    const { showQueue, showCurrentIndex } = get();
+    const { showQueue, showCurrentIndex, music, playlists } = get();
     if (showQueue.length === 0) return;
     const nextIndex = Math.min(showQueue.length - 1, showCurrentIndex + 1);
+    
+    // Handle music playback for music/playlist items
+    const nextItem = showQueue[nextIndex];
+    if (nextItem && (nextItem.type === "music" || nextItem.type === "playlist")) {
+      let trackToPlay: MusicItem | undefined;
+      
+      if (nextItem.type === "music" && nextItem.musicTrackId) {
+        trackToPlay = music.find((m) => m.id === nextItem.musicTrackId);
+      } else if (nextItem.type === "playlist" && nextItem.playlistId) {
+        const playlist = playlists.find((p) => p.id === nextItem.playlistId);
+        if (playlist && playlist.tracks.length > 0) {
+          trackToPlay = playlist.tracks[0];
+        }
+      }
+      
+      if (trackToPlay) {
+        const trackIndex = music.findIndex((m) => m.id === trackToPlay!.id);
+        if (trackIndex >= 0) {
+          set({ musicIndex: trackIndex, musicPlaying: true });
+        }
+      }
+    }
+    
     set({ showCurrentIndex: nextIndex });
   },
 
   showPrevious: () => {
-    const { showQueue, showCurrentIndex } = get();
+    const { showQueue, showCurrentIndex, music, playlists } = get();
     if (showQueue.length === 0) return;
     const prevIndex = Math.max(0, showCurrentIndex - 1);
+    
+    // Handle music playback for music/playlist items
+    const prevItem = showQueue[prevIndex];
+    if (prevItem && (prevItem.type === "music" || prevItem.type === "playlist")) {
+      let trackToPlay: MusicItem | undefined;
+      
+      if (prevItem.type === "music" && prevItem.musicTrackId) {
+        trackToPlay = music.find((m) => m.id === prevItem.musicTrackId);
+      } else if (prevItem.type === "playlist" && prevItem.playlistId) {
+        const playlist = playlists.find((p) => p.id === prevItem.playlistId);
+        if (playlist && playlist.tracks.length > 0) {
+          trackToPlay = playlist.tracks[0];
+        }
+      }
+      
+      if (trackToPlay) {
+        const trackIndex = music.findIndex((m) => m.id === trackToPlay!.id);
+        if (trackIndex >= 0) {
+          set({ musicIndex: trackIndex, musicPlaying: true });
+        }
+      }
+    }
+    
     set({ showCurrentIndex: prevIndex });
+  },
+
+  // Advance show to next item (called when music track ends)
+  advanceShowOnMusicEnd: () => {
+    const { showQueue, showCurrentIndex, music, musicIndex, playlists, showNext } = get();
+    if (showQueue.length === 0) return;
+    
+    const currentItem = showQueue[showCurrentIndex];
+    if (!currentItem) return;
+    
+    // Check if current item is music/playlist
+    if (currentItem.type === "music" || currentItem.type === "playlist") {
+      // Check if we should advance to next item
+      let currentTrackId: string | undefined;
+      
+      if (currentItem.type === "music" && currentItem.musicTrackId) {
+        currentTrackId = currentItem.musicTrackId;
+      } else if (currentItem.type === "playlist" && currentItem.playlistId) {
+        const playlist = playlists.find((p) => p.id === currentItem.playlistId);
+        const currentMusicTrack = music[musicIndex];
+        // Find current track in playlist
+        const playlistTrackIndex = playlist?.tracks.findIndex((t) => t.id === currentMusicTrack?.id);
+        // If this is the last track in the playlist, advance show
+        if (playlistTrackIndex !== undefined && playlistTrackIndex >= 0 && 
+            playlistTrackIndex === (playlist?.tracks.length ?? 0) - 1) {
+          showNext();
+        }
+        return;
+      }
+
+      if (currentItem.type === "music" && currentTrackId) {
+        const nextIndex = Math.min(showQueue.length - 1, showCurrentIndex + 1);
+        if (nextIndex > showCurrentIndex) {
+          showNext();
+        }
+      }
+    }
   },
 
   showNextSlide: () => {
     const state = get();
-    const { showQueue, showCurrentIndex, songs, pdfGroups } = state;
+    const { showQueue, showCurrentIndex, songs, pdfGroups, showAllSongSlides } = state;
     if (showQueue.length === 0 || showCurrentIndex < 0) return;
 
     const currentItem = showQueue[showCurrentIndex];
+
+    // Wenn alle Folien angezeigt werden, direkt zum nächsten Item springen
+    if (showAllSongSlides && currentItem.type === "song") {
+      state.showNext();
+      return;
+    }
 
     // For songs: increment slide index
     if (currentItem.type === "song" && currentItem.refId) {
       const song = songs.find((s) => s.id === currentItem.refId);
       if (song) {
+        const effectiveSong = showAllSongSlides ? { ...song, combineSlides: true } : song;
+        const totalSlides = getSongEffectiveSlideCount(effectiveSong);
+        if (totalSlides <= 1) {
+          state.showNext();
+          return;
+        }
         const currentSlideIndex = currentItem.slideIndex ?? 0;
         const nextSlideIndex = Math.min(
-          Math.max(0, getSongEffectiveSlideCount(song) - 1),
+          Math.max(0, totalSlides - 1),
           currentSlideIndex + 1
         );
         state.updateShowItemSlideIndex(currentItem.id, nextSlideIndex);
@@ -1704,15 +1908,27 @@ export const useStore = create<Store>((set, get) => ({
 
   showPreviousSlide: () => {
     const state = get();
-    const { showQueue, showCurrentIndex, songs, pdfGroups } = state;
+    const { showQueue, showCurrentIndex, songs, pdfGroups, showAllSongSlides } = state;
     if (showQueue.length === 0 || showCurrentIndex < 0) return;
 
     const currentItem = showQueue[showCurrentIndex];
+
+    // Wenn alle Folien angezeigt werden, direkt zum vorherigen Item springen
+    if (showAllSongSlides && currentItem.type === "song") {
+      state.showPrevious();
+      return;
+    }
 
     // For songs: decrement slide index
     if (currentItem.type === "song" && currentItem.refId) {
       const song = songs.find((s) => s.id === currentItem.refId);
       if (song) {
+        const effectiveSong = showAllSongSlides ? { ...song, combineSlides: true } : song;
+        const totalSlides = getSongEffectiveSlideCount(effectiveSong);
+        if (totalSlides <= 1) {
+          state.showPrevious();
+          return;
+        }
         const currentSlideIndex = currentItem.slideIndex ?? 0;
         const prevSlideIndex = Math.max(0, currentSlideIndex - 1);
         state.updateShowItemSlideIndex(currentItem.id, prevSlideIndex);
@@ -1738,6 +1954,9 @@ export const useStore = create<Store>((set, get) => ({
   clearShowQueue: () => {
     set({ showQueue: [], showCurrentIndex: -1 });
   },
+
+  resetMedia: () => resetMedia(),
+  resetShow: () => resetShow(),
 
   reorderShowQueue: (fromIndex, toIndex) => {
     set((s) => {
@@ -1766,13 +1985,18 @@ export const useStore = create<Store>((set, get) => ({
           countdownBackgroundMusicFullVolumeMinutes: normalizeMinutes(parsed.countdownBackgroundMusicFullVolumeMinutes, 2),
           countdownDisplayAfterZeroSeconds: parsed.countdownDisplayAfterZeroSeconds ?? 10,
           outputMonitorIndices: parsed.outputMonitorIndices ?? [],
+          songBackgroundImage: parsed.songBackgroundImage ?? null,
         });
       }
     } catch {
       console.warn("Could not load settings");
     }
-    loadLibrary();
     loadPlaylists();
+    const loadedLibrary = loadLibrary();
+    if (!loadedLibrary) {
+      loadMedia();
+      loadShow();
+    }
   },
 
   saveSettings: () => {
@@ -1789,6 +2013,7 @@ export const useStore = create<Store>((set, get) => ({
         countdownBackgroundMusicFullVolumeMinutes,
         countdownDisplayAfterZeroSeconds,
         outputMonitorIndices,
+        songBackgroundImage,
       } = get();
       localStorage.setItem(
         STORAGE_KEY,
@@ -1804,6 +2029,7 @@ export const useStore = create<Store>((set, get) => ({
           countdownBackgroundMusicFullVolumeMinutes,
           countdownDisplayAfterZeroSeconds,
           outputMonitorIndices,
+          songBackgroundImage,
         })
       );
     } catch {
@@ -1817,7 +2043,6 @@ export const useStore = create<Store>((set, get) => ({
 function savePlaylists() {
   try {
     const { playlists } = useStore.getState();
-    // Persist track lists so playlists can be played back.
     const toPersist = playlists;
     localStorage.setItem(PLAYLISTS_KEY, JSON.stringify(toPersist));
   } catch {
@@ -1845,7 +2070,7 @@ function loadPlaylists() {
 
 function saveLibrary() {
   try {
-    const { slides, pdfGroups, songs, videos, showQueue } = useStore.getState();
+    const { slides, pdfGroups, songs, videos, showQueue, showCurrentIndex } = useStore.getState();
     localStorage.setItem(
       LIBRARY_KEY,
       JSON.stringify({
@@ -1854,6 +2079,7 @@ function saveLibrary() {
         songs,
         videos,
         showQueue,
+        showCurrentIndex,
       })
     );
   } catch {
@@ -1864,7 +2090,7 @@ function saveLibrary() {
 function loadLibrary() {
   try {
     const saved = localStorage.getItem(LIBRARY_KEY);
-    if (!saved) return;
+    if (!saved) return false;
 
     const parsed = JSON.parse(saved);
     const slides = Array.isArray(parsed.slides) ? parsed.slides.map(reviveMediaItem) : [];
@@ -1872,6 +2098,7 @@ function loadLibrary() {
     const pdfGroups = Array.isArray(parsed.pdfGroups) ? parsed.pdfGroups.map(revivePdfGroup) : [];
     const songs = Array.isArray(parsed.songs) ? parsed.songs.map(reviveSong) : [];
     const showQueue = Array.isArray(parsed.showQueue) ? parsed.showQueue : [];
+    const showCurrentIndex = typeof parsed.showCurrentIndex === "number" ? parsed.showCurrentIndex : -1;
 
     useStore.setState({
       slides,
@@ -1879,10 +2106,100 @@ function loadLibrary() {
       pdfGroups,
       songs,
       showQueue,
-      showCurrentIndex: -1,
+      showCurrentIndex,
     });
   } catch {
     console.warn("Could not load library");
+    return false;
+  }
+  return true;
+}
+// ── Media & Show Persistence ────────────────────────────────────
+
+function saveMedia() {
+  try {
+    const { slides, videos } = useStore.getState();
+    // Only persist metadata (paths), not binary data
+    const toPersist = {
+      slides: slides.map(s => ({ id: s.id, name: s.name, path: s.path, src: s.src, type: s.type })),
+      videos: videos.map(v => ({ id: v.id, name: v.name, path: v.path, src: v.src, type: v.type, duration: v.duration })),
+    };
+    localStorage.setItem(MEDIA_STORAGE_KEY, JSON.stringify(toPersist));
+  } catch {
+    console.warn("Could not save media");
+  }
+}
+
+function loadMedia() {
+  try {
+    const saved = localStorage.getItem(MEDIA_STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      useStore.setState({
+        slides: Array.isArray(parsed.slides) ? parsed.slides.map(reviveMediaItem) : [],
+        videos: Array.isArray(parsed.videos) ? parsed.videos.map(reviveMediaItem) : [],
+      });
+    }
+  } catch {
+    console.warn("Could not load media");
+  }
+}
+
+function saveShow() {
+  try {
+    const { showQueue, showCurrentIndex } = useStore.getState();
+    localStorage.setItem(SHOW_STORAGE_KEY, JSON.stringify({ showQueue, showCurrentIndex }));
+  } catch {
+    console.warn("Could not save show");
+  }
+}
+
+function loadShow() {
+  try {
+    const saved = localStorage.getItem(SHOW_STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      useStore.setState({
+        showQueue: Array.isArray(parsed.showQueue) ? parsed.showQueue : [],
+        showCurrentIndex: typeof parsed.showCurrentIndex === "number" ? parsed.showCurrentIndex : -1,
+      });
+    }
+  } catch {
+    console.warn("Could not load show");
+  }
+}
+
+function resetMedia() {
+  try {
+    localStorage.removeItem(MEDIA_STORAGE_KEY);
+    const { outputMode } = useStore.getState();
+    useStore.setState((s) => ({
+      slides: [],
+      videos: [],
+      activeSlideId: null,
+      activeVideoId: null,
+      showQueue: s.showQueue.filter((item) => item.type !== "image" && item.type !== "video"),
+      showCurrentIndex:
+        s.showCurrentIndex >= 0 && s.showQueue[s.showCurrentIndex] &&
+        (s.showQueue[s.showCurrentIndex].type === "image" || s.showQueue[s.showCurrentIndex].type === "video")
+          ? -1
+          : s.showCurrentIndex,
+      outputMode: outputMode === "image" || outputMode === "video" ? "blank" : s.outputMode,
+    }));
+    if (outputMode === "image" || outputMode === "video") {
+      void sendToOutput({ mode: "blank" });
+    }
+  } catch {
+    console.warn("Could not reset media");
+  }
+}
+
+function resetShow() {
+  try {
+    localStorage.removeItem(SHOW_STORAGE_KEY);
+    useStore.setState({ showQueue: [], showCurrentIndex: -1 });
+  } catch {
+    console.warn("Could not reset show");
   }
 }
 
@@ -1944,10 +2261,7 @@ function initMusicEngine() {
 
 // Auto-save settings on changes
 useStore.subscribe((state, prevState) => {
-  if (!prevState) {
-    state.saveSettings();
-    return;
-  }
+  if (!prevState) return;
 
   const changed =
     state.countdownLabel !== prevState.countdownLabel ||
@@ -1960,9 +2274,25 @@ useStore.subscribe((state, prevState) => {
     state.countdownBackgroundMusicStartVolumePercent !== prevState.countdownBackgroundMusicStartVolumePercent ||
     state.countdownBackgroundMusicFadeInStartMinutes !== prevState.countdownBackgroundMusicFadeInStartMinutes ||
     state.countdownBackgroundMusicFullVolumeMinutes !== prevState.countdownBackgroundMusicFullVolumeMinutes ||
-    state.countdownDisplayAfterZeroSeconds !== prevState.countdownDisplayAfterZeroSeconds;
+    state.countdownDisplayAfterZeroSeconds !== prevState.countdownDisplayAfterZeroSeconds ||
+    state.songBackgroundImage !== prevState.songBackgroundImage;
 
   if (changed) state.saveSettings();
+
+  // Auto-save playlists on change
+  if (state.playlists !== prevState.playlists) {
+    savePlaylists();
+  }
+
+  // Auto-save media on change
+  if (state.slides !== prevState.slides || state.videos !== prevState.videos) {
+    saveMedia();
+  }
+
+  // Auto-save show on change
+  if (state.showQueue !== prevState.showQueue || state.showCurrentIndex !== prevState.showCurrentIndex) {
+    saveShow();
+  }
 });
 
 useStore.subscribe((state, prevState) => {
@@ -1976,7 +2306,8 @@ useStore.subscribe((state, prevState) => {
     state.videos !== prevState.videos ||
     state.pdfGroups !== prevState.pdfGroups ||
     state.songs !== prevState.songs ||
-    state.showQueue !== prevState.showQueue;
+    state.showQueue !== prevState.showQueue ||
+    state.showCurrentIndex !== prevState.showCurrentIndex;
 
   if (libraryChanged) {
     saveLibrary();
@@ -2007,6 +2338,7 @@ useStore.subscribe((state, prevState) => {
 // Load settings on init
 (() => {
   if (typeof window !== "undefined") {
+    initOutputReplayListener();
     useStore.getState().loadSettings();
     initMusicEngine();
   }

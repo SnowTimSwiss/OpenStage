@@ -673,8 +673,12 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { .. } = event {
                 if window.label() == "main" {
-                    if let Some(output) = window.app_handle().get_webview_window("output") {
-                        let _ = output.close();
+                    // Close all output windows
+                    let windows = window.app_handle().webview_windows();
+                    for (label, w) in windows.iter() {
+                        if label.starts_with("output") {
+                            let _ = w.close();
+                        }
                     }
                     cleanup_pptx_temp_files();
                 }

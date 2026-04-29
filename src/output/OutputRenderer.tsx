@@ -112,23 +112,116 @@ export default function OutputRenderer({
   }
 
   if (mode === "song" && state.song) {
+    const isAllSlides = state.song.allSlides === true;
+    const songFontSizeValue = compact 
+      ? (isAllSlides ? "clamp(0.65rem, 1.3vw, 0.95rem)" : "clamp(0.75rem, 1.6vw, 1.15rem)")
+      : (isAllSlides ? "clamp(1.25rem, 3vw, 2.5rem)" : "clamp(2rem, 5vw, 5rem)");
+    
+    // Bei ganzen Liedern: Text in Spalten aufteilen für bessere Lesbarkeit
+    const gridColumnStyle = isAllSlides && !compact
+      ? {
+          columnCount: 2,
+          columnGap: "3rem",
+          textAlign: "center" as const,
+        }
+      : {};
+    
     return (
       <div
-        className={`${rootClassName} bg-black flex flex-col items-center justify-center px-20 transition-opacity duration-300`}
+        className={`${rootClassName} bg-black flex flex-col items-center justify-center px-20 transition-opacity duration-300 relative`}
+        style={{
+          ...transitionStyle,
+          backgroundImage: state.song.backgroundImage ? `url(${state.song.backgroundImage})` : undefined,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          backgroundRepeat: "no-repeat",
+        }}
+      >
+        {/* Overlay für bessere Lesbarkeit */}
+        <div
+          className="absolute inset-0"
+          style={{
+            background: state.song.backgroundImage ? "rgba(0,0,0,0.6)" : undefined,
+          }}
+        />
+
+        <div className="relative z-10 flex flex-col items-center justify-center w-full h-full">
+          <p
+            className="text-white leading-snug whitespace-pre-line"
+            style={{
+              fontSize: songFontSizeValue,
+              fontFamily: "'Sora', sans-serif",
+              fontWeight: 300,
+              textShadow: "0 2px 20px rgba(0,0,0,0.8)",
+              letterSpacing: "0.01em",
+              ...gridColumnStyle,
+            }}
+          >
+            {state.song.text}
+          </p>
+        </div>
+
+        {/* Artist / Titel unten links */}
+        <div className="absolute bottom-8 left-8 text-left z-10">
+          {state.song.title && (
+            <p
+              className="text-white font-medium"
+              style={{
+                fontSize: compact ? "1rem" : "1.75rem",
+                fontFamily: "'Sora', sans-serif",
+                textShadow: "0 2px 20px rgba(0,0,0,0.8)",
+              }}
+            >
+              {state.song.title}
+            </p>
+          )}
+          <p
+            className="text-white/60"
+            style={{
+              fontSize: compact ? "0.75rem" : "1.25rem",
+              fontFamily: "'Sora', sans-serif",
+              textShadow: "0 2px 20px rgba(0,0,0,0.8)",
+            }}
+          >
+            {state.song.artist || "Unbekannter Künstler"}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (mode === "music" && state.music) {
+    return (
+      <div
+        className={`${rootClassName} bg-black flex items-center justify-center transition-opacity duration-300`}
         style={transitionStyle}
       >
-        <p
-          className="text-white text-center leading-snug whitespace-pre-line"
-          style={{
-            fontSize: songFontSize,
-            fontFamily: "'Sora', sans-serif",
-            fontWeight: 300,
-            textShadow: "0 2px 20px rgba(0,0,0,0.8)",
-            letterSpacing: "0.01em",
-          }}
-        >
-          {state.song.text}
-        </p>
+        <div className="text-center">
+          {state.music.trackName && (
+            <p
+              className="text-white font-medium mb-2"
+              style={{
+                fontSize: compact ? "1.25rem" : "2.5rem",
+                fontFamily: "'Sora', sans-serif",
+                textShadow: "0 2px 20px rgba(0,0,0,0.8)",
+              }}
+            >
+              {state.music.trackName}
+            </p>
+          )}
+          {state.music.artist && (
+            <p
+              className="text-white/60"
+              style={{
+                fontSize: compact ? "0.875rem" : "1.5rem",
+                fontFamily: "'Sora', sans-serif",
+                textShadow: "0 2px 20px rgba(0,0,0,0.8)",
+              }}
+            >
+              {state.music.artist}
+            </p>
+          )}
+        </div>
       </div>
     );
   }
