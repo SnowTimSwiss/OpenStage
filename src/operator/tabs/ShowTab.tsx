@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { getSongEffectiveSlideCount, getSongPresentation } from "../../lib/songPresentation";
 import { useStore } from "../../store/useStore";
 import { sendToOutput } from "../../lib/events";
 import OutputRenderer from "../../output/OutputRenderer";
@@ -137,7 +138,7 @@ export default function ShowTab() {
   function getTotalSlides(item: ShowItem) {
     if (item.type === "song" && item.refId) {
       const song = songs.find((s) => s.id === item.refId);
-      return song?.slides.length ?? 1;
+      return song ? getSongEffectiveSlideCount(song) : 1;
     }
     if (item.type === "pdf" && item.refId) {
       const group = pdfGroups.find((g) => g.id === item.refId);
@@ -411,16 +412,15 @@ function buildOutputPayload(
     case "song": {
       const song = songs.find((s) => s.id === item.refId);
       if (!song) return { mode: "blank" };
-      const slideIdx = item.slideIndex ?? 0;
-      const slide = song.slides[slideIdx];
-      if (!slide) return { mode: "blank" };
+      const presentation = getSongPresentation(song, item.slideIndex ?? 0);
+      if (presentation.total <= 0) return { mode: "blank" };
       return {
         mode: "song",
         song: {
-          text: slide.text,
+          text: presentation.text,
           title: song.title,
-          index: slideIdx,
-          total: song.slides.length,
+          index: presentation.index,
+          total: presentation.total,
         },
       };
     }

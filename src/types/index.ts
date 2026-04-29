@@ -12,6 +12,7 @@ export interface Song {
   title: string;
   artist?: string;
   slides: SongSlide[];
+  combineSlides?: boolean;
 }
 
 export type MediaType = "image" | "video" | "pdf";

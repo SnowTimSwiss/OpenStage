@@ -9,6 +9,7 @@ import MusicTab from "./tabs/MusicTab";
 import DisplayTab from "./tabs/DisplayTab";
 import ShowTab from "./tabs/ShowTab";
 import OutputRenderer from "../output/OutputRenderer";
+import { getSongPresentation } from "../lib/songPresentation";
 import type { OutputPayload } from "../types";
 
 export default function OperatorApp() {
@@ -19,20 +20,32 @@ export default function OperatorApp() {
   }, []);
 
   useEffect(() => {
-    const toggleBlackout = useStore.getState().toggleBlackout;
-    const nextSlide = useStore.getState().nextSongSlide;
-    const prevSlide = useStore.getState().prevSongSlide;
-
     function onKey(e: KeyboardEvent) {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (e.code === "KeyB") toggleBlackout();
-      if (e.code === "ArrowRight" || e.code === "Space") nextSlide();
-      if (e.code === "ArrowLeft") prevSlide();
+      const state = useStore.getState();
+
+      if (e.code === "KeyB") {
+        state.toggleBlackout();
+        return;
+      }
+
+      if (activeTab === "show") return;
+      if (activeTab !== "songs") return;
+
+      if (e.code === "ArrowRight" || e.code === "Space") {
+        e.preventDefault();
+        state.nextSongSlide();
+      }
+
+      if (e.code === "ArrowLeft") {
+        e.preventDefault();
+        state.prevSongSlide();
+      }
     }
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [activeTab]);
 
   return (
     <div className="flex flex-col h-screen overflow-hidden">
@@ -94,6 +107,7 @@ function PreviewPanel() {
     pdfGroups.flatMap((g) => g.pages).find((s) => s.id === activeSlideId);
   const activeVideo = videos.find((v) => v.id === activeVideoId);
   const currentMusic = music[musicIndex];
+  const activeSongPresentation = activeSong ? getSongPresentation(activeSong, activeSongSlide) : null;
 
   const duration = musicDuration || 0;
   const currentTime = Math.min(musicCurrentTime, duration || musicCurrentTime);
@@ -104,19 +118,16 @@ function PreviewPanel() {
     if ((outputMode === "image" || outputMode === "html") && activeSlide) {
       return { mode: "image", image: { src: activeSlide.src } };
     }
-    if (outputMode === "song" && activeSong) {
-      const slide = activeSong.slides[activeSongSlide];
-      if (slide) {
+    if (outputMode === "song" && activeSong && activeSongPresentation && activeSongPresentation.total > 0) {
         return {
           mode: "song",
           song: {
-            text: slide.text,
+            text: activeSongPresentation.text,
             title: activeSong.title,
-            index: activeSongSlide,
-            total: activeSong.slides.length,
+            index: activeSongPresentation.index,
+            total: activeSongPresentation.total,
           },
         };
-      }
     }
     if (outputMode === "countdown") {
       return {
@@ -139,6 +150,7 @@ function PreviewPanel() {
     activeSlide,
     activeSong,
     activeSongSlide,
+    activeSongPresentation,
     countdownRemaining,
     countdownLabel,
     countdownTheme,
@@ -172,9 +184,9 @@ function PreviewPanel() {
             {isBlackout ? "Blackout" : outputMode === "blank" ? "Leer" : outputMode}
           </span>
         </div>
-        {outputMode === "song" && activeSong && (
+        {outputMode === "song" && activeSong && activeSongPresentation && activeSongPresentation.total > 0 && (
           <div className="text-[11px]" style={{ color: "#444" }}>
-            Folie <span style={{ color: "#888" }}>{activeSongSlide + 1}/{activeSong.slides.length}</span>
+            Folie <span style={{ color: "#888" }}>{activeSongPresentation.index + 1}/{activeSongPresentation.total}</span>
           </div>
         )}
         {outputMode === "video" && activeVideo && (

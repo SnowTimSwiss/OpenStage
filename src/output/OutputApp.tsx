@@ -10,7 +10,6 @@ export default function OutputApp() {
   const [pendingState, setPendingState] = useState<OutputPayload | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [videoError, setVideoError] = useState(false);
-  const [monitorIndex, setMonitorIndex] = useState<number | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const transitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentModeRef = useRef<OutputPayload["mode"]>("blank");
@@ -23,7 +22,6 @@ export default function OutputApp() {
     const monitorParam = params.get("monitor");
     const idx = monitorParam !== null ? parseInt(monitorParam, 10) : null;
     if (!isNaN(idx!)) {
-      setMonitorIndex(idx);
       // Update window title with monitor number
       const windowLabel = `output-${idx}`;
       WebviewWindow.getByLabel(windowLabel).then((w) => {

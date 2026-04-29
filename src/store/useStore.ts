@@ -10,6 +10,7 @@ import {
   closeAllOutputWindows as closeAllOutputFn,
 } from "../lib/events";
 import { secondsUntilTargetTime } from "../lib/formatTime";
+import { getSongEffectiveSlideCount, getSongPresentation } from "../lib/songPresentation";
 import type {
   Song, MediaItem, MusicItem, Playlist, MusicSource,
   Monitor, TabId, OutputMode, PdfGroup, CountdownTheme, ShowItem,
@@ -17,6 +18,7 @@ import type {
 
 const STORAGE_KEY = "openstage-settings-v1";
 const PLAYLISTS_KEY = "openstage-playlists-v1";
+const LIBRARY_KEY = "openstage-library-v1";
 
 let countdownInterval: ReturnType<typeof setInterval> | null = null;
 let musicAudio: HTMLAudioElement | null = null;
@@ -105,6 +107,50 @@ function normalizeVolume(value: unknown, fallback: number): number {
   const n = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(0, Math.min(1, n));
+}
+
+function reviveMediaItem(item: MediaItem): MediaItem {
+  if ((item.type === "image" || item.type === "video") && item.path) {
+    return {
+      ...item,
+      src: convertFileSrc(item.path),
+    };
+  }
+
+  return item;
+}
+
+function revivePdfGroup(group: PdfGroup): PdfGroup {
+  return {
+    ...group,
+    pages: Array.isArray(group.pages) ? group.pages.map((page) => ({ ...page })) : [],
+  };
+}
+
+function reviveSong(song: Song): Song {
+  return {
+    ...song,
+    id: song.id || crypto.randomUUID(),
+    combineSlides: Boolean(song.combineSlides),
+    slides: Array.isArray(song.slides)
+      ? song.slides.map((slide, index) => ({
+          ...slide,
+          id: slide.id || crypto.randomUUID(),
+          label: slide.label ?? `Folie ${index + 1}`,
+        }))
+      : [],
+  };
+}
+
+function reviveMusicItem(track: MusicItem): MusicItem {
+  if (track.path) {
+    return {
+      ...track,
+      src: convertFileSrc(track.path),
+    };
+  }
+
+  return track;
 }
 
 /**
@@ -817,10 +863,27 @@ export const useStore = create<Store>((set, get) => ({
   activeSongSlide: 0,
 
   addSong: (song) =>
-    set((s) => ({ songs: [...s.songs, { ...song, id: crypto.randomUUID() }] })),
+    set((s) => ({
+      songs: [
+        ...s.songs,
+        reviveSong({
+          ...song,
+          id: crypto.randomUUID(),
+        } as Song),
+      ],
+    })),
 
   updateSong: (id, song) =>
-    set((s) => ({ songs: s.songs.map((x) => (x.id === id ? { ...song, id } : x)) })),
+    set((s) => ({
+      songs: s.songs.map((x) =>
+        x.id === id
+          ? reviveSong({
+              ...song,
+              id,
+            } as Song)
+          : x
+      ),
+    })),
 
   removeSong: (id) =>
     set((s) => ({
@@ -832,15 +895,22 @@ export const useStore = create<Store>((set, get) => ({
 
   goLiveSongSlide: (songId, index) => {
     const song = get().songs.find((s) => s.id === songId);
-    if (!song || !song.slides[index]) return;
-    set({ activeSongId: songId, activeSongSlide: index, outputMode: "song", isBlackout: false });
+    if (!song || song.slides.length === 0) return;
+
+    const presentation = getSongPresentation(song, index);
+    set({
+      activeSongId: songId,
+      activeSongSlide: presentation.index,
+      outputMode: "song",
+      isBlackout: false,
+    });
     sendToOutput({
       mode: "song",
       song: {
-        text: song.slides[index].text,
+        text: presentation.text,
         title: song.title,
-        index,
-        total: song.slides.length,
+        index: presentation.index,
+        total: presentation.total,
       },
     });
   },
@@ -850,7 +920,7 @@ export const useStore = create<Store>((set, get) => ({
     if (!activeSongId) return;
     const song = songs.find((s) => s.id === activeSongId);
     if (!song) return;
-    const next = Math.min(activeSongSlide + 1, song.slides.length - 1);
+    const next = Math.min(activeSongSlide + 1, Math.max(0, getSongEffectiveSlideCount(song) - 1));
     goLiveSongSlide(activeSongId, next);
   },
 
@@ -1608,7 +1678,10 @@ export const useStore = create<Store>((set, get) => ({
       const song = songs.find((s) => s.id === currentItem.refId);
       if (song) {
         const currentSlideIndex = currentItem.slideIndex ?? 0;
-        const nextSlideIndex = Math.min(song.slides.length - 1, currentSlideIndex + 1);
+        const nextSlideIndex = Math.min(
+          Math.max(0, getSongEffectiveSlideCount(song) - 1),
+          currentSlideIndex + 1
+        );
         state.updateShowItemSlideIndex(currentItem.id, nextSlideIndex);
         return;
       }
@@ -1698,6 +1771,7 @@ export const useStore = create<Store>((set, get) => ({
     } catch {
       console.warn("Could not load settings");
     }
+    loadLibrary();
     loadPlaylists();
   },
 
@@ -1758,6 +1832,7 @@ function loadPlaylists() {
       const parsed = JSON.parse(saved);
       const loadedPlaylists: Playlist[] = parsed.map((p: Playlist) => ({
         ...p,
+        tracks: Array.isArray(p.tracks) ? p.tracks.map(reviveMusicItem) : [],
         createdAt: p.createdAt || Date.now(),
         updatedAt: p.updatedAt || Date.now(),
       }));
@@ -1765,6 +1840,49 @@ function loadPlaylists() {
     }
   } catch {
     console.warn("Could not load playlists");
+  }
+}
+
+function saveLibrary() {
+  try {
+    const { slides, pdfGroups, songs, videos, showQueue } = useStore.getState();
+    localStorage.setItem(
+      LIBRARY_KEY,
+      JSON.stringify({
+        slides,
+        pdfGroups,
+        songs,
+        videos,
+        showQueue,
+      })
+    );
+  } catch {
+    console.warn("Could not save library");
+  }
+}
+
+function loadLibrary() {
+  try {
+    const saved = localStorage.getItem(LIBRARY_KEY);
+    if (!saved) return;
+
+    const parsed = JSON.parse(saved);
+    const slides = Array.isArray(parsed.slides) ? parsed.slides.map(reviveMediaItem) : [];
+    const videos = Array.isArray(parsed.videos) ? parsed.videos.map(reviveMediaItem) : [];
+    const pdfGroups = Array.isArray(parsed.pdfGroups) ? parsed.pdfGroups.map(revivePdfGroup) : [];
+    const songs = Array.isArray(parsed.songs) ? parsed.songs.map(reviveSong) : [];
+    const showQueue = Array.isArray(parsed.showQueue) ? parsed.showQueue : [];
+
+    useStore.setState({
+      slides,
+      videos,
+      pdfGroups,
+      songs,
+      showQueue,
+      showCurrentIndex: -1,
+    });
+  } catch {
+    console.warn("Could not load library");
   }
 }
 
@@ -1845,6 +1963,24 @@ useStore.subscribe((state, prevState) => {
     state.countdownDisplayAfterZeroSeconds !== prevState.countdownDisplayAfterZeroSeconds;
 
   if (changed) state.saveSettings();
+});
+
+useStore.subscribe((state, prevState) => {
+  if (!prevState) {
+    saveLibrary();
+    return;
+  }
+
+  const libraryChanged =
+    state.slides !== prevState.slides ||
+    state.videos !== prevState.videos ||
+    state.pdfGroups !== prevState.pdfGroups ||
+    state.songs !== prevState.songs ||
+    state.showQueue !== prevState.showQueue;
+
+  if (libraryChanged) {
+    saveLibrary();
+  }
 });
 
 // Keep countdown output/audio in sync with global output selection.
