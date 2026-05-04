@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { getSongEffectiveSlideCount, getSongPresentation } from "../../lib/songPresentation";
 import { useStore } from "../../store/useStore";
 import { sendToOutput } from "../../lib/events";
@@ -210,7 +210,7 @@ export default function ShowTab() {
         
         <div className="flex items-center gap-2">
           <span className="text-[10px]" style={{ color: "#555" }}>
-            ← → Slides • ↑↓ Items
+            â† â†’ Slides â€¢ â†‘â†“ Items
           </span>
           <button
             onClick={() => setIsAddModalOpen(true)}
@@ -226,7 +226,7 @@ export default function ShowTab() {
               style={{ background: "#2a0a0a", color: "#ef4444", border: "1px solid #333" }}
               title="Show Queue leeren"
             >
-              🗑️ Reset
+              ðŸ—‘ï¸ Reset
             </button>
           )}
         </div>
@@ -243,7 +243,7 @@ export default function ShowTab() {
           <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1">
             {showQueue.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-center px-4">
-                <span className="text-3xl mb-2">📋</span>
+                <span className="text-3xl mb-2">ðŸ“‹</span>
                 <p className="text-xs" style={{ color: "#555" }}>
                   No items in queue
                 </p>
@@ -272,7 +272,7 @@ export default function ShowTab() {
                           className="text-[10px] cursor-grab active:cursor-grabbing select-none"
                           style={{ color: "#444" }}
                         >
-                          ⋮⋮
+                          â‹®â‹®
                         </span>
                         <span className="text-lg">{getItemIcon(item.type)}</span>
 
@@ -300,9 +300,9 @@ export default function ShowTab() {
                                   e.stopPropagation();
                                   toggleShowMusicOverlay(item.id);
                                 }}
-                                title={item.showMusicOverlay !== false ? "Overlay anzeige: Titel & Künstler" : "Overlay aus: Blackscreen"}
+                                title={item.showMusicOverlay !== false ? "Overlay anzeige: Titel & KÃ¼nstler" : "Overlay aus: Blackscreen"}
                               >
-                                {item.showMusicOverlay !== false ? "👁" : "🚫"}
+                                {item.showMusicOverlay !== false ? "ðŸ‘" : "ðŸš«"}
                               </span>
                             )}
                           </div>
@@ -327,7 +327,7 @@ export default function ShowTab() {
                           style={{ color: "#777", border: "1px solid #2a2a2a", background: "#181818" }}
                           title="Nach oben"
                         >
-                          ↑
+                          â†‘
                         </button>
 
                         <button
@@ -340,7 +340,7 @@ export default function ShowTab() {
                           style={{ color: "#777", border: "1px solid #2a2a2a", background: "#181818" }}
                           title="Nach unten"
                         >
-                          ↓
+                          â†“
                         </button>
 
                         <button
@@ -351,7 +351,7 @@ export default function ShowTab() {
                           className="text-[10px] p-1 rounded hover:bg-[#222]"
                           style={{ color: "#555" }}
                         >
-                          ✕
+                          âœ•
                         </button>
                       </div>
                     </div>
@@ -370,14 +370,14 @@ export default function ShowTab() {
                   className="flex-1 text-xs py-1.5 rounded-lg transition-all"
                   style={{ background: "#222", color: "#ccc", border: "1px solid #333" }}
                 >
-                  ← Prev
+                  â† Prev
                 </button>
                 <button
                   onClick={showNextSlide}
                   className="flex-1 text-xs py-1.5 rounded-lg transition-all"
                   style={{ background: "#f97316", color: "white", border: "1px solid #f97316" }}
                 >
-                  Next →
+                  Next â†’
                 </button>
               </div>
 
@@ -390,7 +390,7 @@ export default function ShowTab() {
                     style={{ background: "#1a1a1a", color: "#aaa", border: "1px solid #333" }}
                     title="Vorheriger Track"
                   >
-                    ⏮
+                    â®
                   </button>
                   <button
                     onClick={() => setMusicPlaying(!musicPlaying)}
@@ -403,15 +403,15 @@ export default function ShowTab() {
                     }}
                     title={musicPlaying ? "Pause" : "Play"}
                   >
-                    {musicPlaying ? "⏸" : "▶"}
+                    {musicPlaying ? "â¸" : "â–¶"}
                   </button>
                   <button
                     onClick={playNextMusic}
                     className="w-8 h-8 rounded-lg flex items-center justify-center text-xs"
                     style={{ background: "#1a1a1a", color: "#aaa", border: "1px solid #333" }}
-                    title="Nächster Track"
+                    title="NÃ¤chster Track"
                   >
-                    ⏭
+                    â­
                   </button>
 
                   {/* Progress Bar */}
@@ -439,7 +439,7 @@ export default function ShowTab() {
 
                   {/* Volume */}
                   <div className="flex items-center gap-1">
-                    <span className="text-[10px]" style={{ color: "#666" }}>🔊</span>
+                    <span className="text-[10px]" style={{ color: "#666" }}>ðŸ”Š</span>
                     <input
                       type="range"
                       min={0}
@@ -500,7 +500,7 @@ export default function ShowTab() {
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center h-full text-center px-4">
-                <span className="text-4xl mb-3 block">🎬</span>
+                <span className="text-4xl mb-3 block">ðŸŽ¬</span>
                 <p className="text-sm" style={{ color: "#555" }}>
                   No item selected
                 </p>
@@ -525,7 +525,7 @@ export default function ShowTab() {
                       {(currentItem.type === "song" || currentItem.type === "pdf") && (
                         <span>
                           {" "}
-                          • Slide: {(currentItem.slideIndex ?? 0) + 1}/{getTotalSlides(currentItem)}
+                          â€¢ Slide: {(currentItem.slideIndex ?? 0) + 1}/{getTotalSlides(currentItem)}
                         </span>
                       )}
                     </p>
@@ -537,14 +537,14 @@ export default function ShowTab() {
                     className="text-xs px-2 py-1 rounded"
                     style={{ background: "#222", color: "#ccc", border: "1px solid #333" }}
                   >
-                    ← Prev
+                    â† Prev
                   </button>
                   <button
                     onClick={showNextSlide}
                     className="text-xs px-2 py-1 rounded"
                     style={{ background: "#f97316", color: "white", border: "1px solid #f97316" }}
                   >
-                    Next →
+                    Next â†’
                   </button>
                 </div>
               </div>
@@ -578,7 +578,7 @@ export default function ShowTab() {
             </div>
             <div className="p-4">
               <p className="text-sm" style={{ color: "#ccc" }}>
-                Dies entfernt alle Items aus der Show Queue. Diese Aktion kann nicht rückgängig gemacht werden.
+                Dies entfernt alle Items aus der Show Queue. Diese Aktion kann nicht rÃ¼ckgÃ¤ngig gemacht werden.
               </p>
             </div>
             <div className="px-4 py-3 border-t flex items-center justify-end gap-2" style={{ borderColor: "#333" }}>
@@ -621,6 +621,7 @@ function buildOutputPayload(
   const { slides, videos, songs, pdfGroups, countdownRemaining, countdownLabel, countdownTheme, music, playlists } = data;
   const showAllSongSlides = useStore.getState().showAllSongSlides;
   const songBackgroundImage = useStore.getState().songBackgroundImage;
+  const musicBackgroundImage = useStore.getState().musicBackgroundImage;
 
   switch (item.type) {
     case "image": {
@@ -669,13 +670,33 @@ function buildOutputPayload(
         },
       };
     case "music": {
-      if (!item.musicTrackId || !music.find((m) => m.id === item.musicTrackId)) return { mode: "blank" };
-      return { mode: "blackout" };
+      const track = item.musicTrackId ? music.find((m) => m.id === item.musicTrackId) : null;
+      if (!track) return { mode: "blank" };
+      return {
+        mode: "music",
+        music: {
+          src: track.src,
+          playing: true,
+          trackName: track.name,
+          artist: track.artist,
+          backgroundImage: musicBackgroundImage,
+        },
+      };
     }
     case "playlist": {
       const playlist = item.playlistId ? playlists.find((p) => p.id === item.playlistId) : null;
       if (!playlist || playlist.tracks.length === 0) return { mode: "blank" };
-      return { mode: "blackout" };
+      const track = playlist.tracks[0];
+      return {
+        mode: "music",
+        music: {
+          src: track.src,
+          playing: true,
+          trackName: track.name,
+          artist: track.artist,
+          backgroundImage: musicBackgroundImage,
+        },
+      };
     }
     default:
       return { mode: "blank" };
@@ -685,19 +706,19 @@ function buildOutputPayload(
 function getItemIcon(type: ShowItem["type"]): string {
   switch (type) {
     case "image":
-      return "🖼️";
+      return "ðŸ–¼ï¸";
     case "video":
-      return "🎬";
+      return "ðŸŽ¬";
     case "song":
-      return "🎵";
+      return "ðŸŽµ";
     case "countdown":
-      return "⏱️";
+      return "â±ï¸";
     case "pdf":
-      return "📊";
+      return "ðŸ“Š";
     case "music":
-      return "🎶";
+      return "ðŸŽ¶";
     case "playlist":
-      return "📀";
+      return "ðŸ“€";
   }
 }
 
@@ -755,6 +776,30 @@ interface AddToShowModalProps {
 
 function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, onAdd, onClose }: AddToShowModalProps) {
   const [activeSection, setActiveSection] = useState<"media" | "songs" | "pdf" | "countdown" | "music">("media");
+  const [searchQuery, setSearchQuery] = useState("");
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+
+  function matchesSearch(...values: Array<string | undefined | null>) {
+    if (!normalizedSearch) return true;
+    return values.some((value) => value?.toLowerCase().includes(normalizedSearch));
+  }
+
+  const filteredSlides = slides.filter((slide) => matchesSearch(slide.name, slide.path));
+  const filteredVideos = videos.filter((video) => matchesSearch(video.name, video.path));
+  const filteredSongs = songs.filter((song) =>
+    matchesSearch(
+      song.title,
+      song.artist,
+      ...song.slides.map((slide: any) => `${slide.label ?? ""} ${slide.text ?? ""}`)
+    )
+  );
+  const filteredPdfGroups = pdfGroups.filter((group) => matchesSearch(group.name));
+  const filteredMusic = music.filter((track) => matchesSearch(track.name, track.artist, track.album));
+  const filteredPlaylists = playlists.filter((playlist) =>
+    matchesSearch(playlist.name, playlist.description, ...playlist.tracks.map((track: any) => `${track.name} ${track.artist ?? ""}`))
+  );
+  const hasMediaMatches = filteredSlides.length > 0 || filteredVideos.length > 0;
+  const hasMusicMatches = filteredMusic.length > 0 || filteredPlaylists.length > 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={onClose}>
@@ -766,7 +811,7 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, on
         <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: "#333" }}>
           <h3 className="text-sm font-semibold text-white">Add to Show</h3>
           <button onClick={onClose} className="text-xs px-2 py-1 rounded hover:bg-[#333]" style={{ color: "#888" }}>
-            ✕
+            âœ•
           </button>
         </div>
 
@@ -777,7 +822,7 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, on
               activeSection === "media" ? "text-[#f97316] border-b-2 border-[#f97316]" : "text-[#888]"
             }`}
           >
-            📁 Media
+            ðŸ“ Media
           </button>
           <button
             onClick={() => setActiveSection("songs")}
@@ -785,7 +830,7 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, on
               activeSection === "songs" ? "text-[#f97316] border-b-2 border-[#f97316]" : "text-[#888]"
             }`}
           >
-            🎵 Songs
+            ðŸŽµ Songs
           </button>
           <button
             onClick={() => setActiveSection("pdf")}
@@ -793,7 +838,7 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, on
               activeSection === "pdf" ? "text-[#f97316] border-b-2 border-[#f97316]" : "text-[#888]"
             }`}
           >
-            📊 PowerPoint
+            ðŸ“Š PowerPoint
           </button>
           <button
             onClick={() => setActiveSection("music")}
@@ -801,7 +846,7 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, on
               activeSection === "music" ? "text-[#f97316] border-b-2 border-[#f97316]" : "text-[#888]"
             }`}
           >
-            🎶 Musik
+            ðŸŽ¶ Musik
           </button>
           <button
             onClick={() => setActiveSection("countdown")}
@@ -809,9 +854,23 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, on
               activeSection === "countdown" ? "text-[#f97316] border-b-2 border-[#f97316]" : "text-[#888]"
             }`}
           >
-            ⏱️ Countdown
+            â±ï¸ Countdown
           </button>
         </div>
+
+        {activeSection !== "countdown" && (
+          <div className="px-3 py-3 border-b" style={{ borderColor: "#333" }}>
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Suchen..."
+              className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+              style={{ background: "#0d0d0d", color: "#ddd", border: "1px solid #333" }}
+              autoFocus
+            />
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto p-3">
           {activeSection === "media" && (
@@ -820,22 +879,26 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, on
                 <p className="text-xs text-center py-4" style={{ color: "#666" }}>
                   No media available. Add media first.
                 </p>
+              ) : !hasMediaMatches ? (
+                <p className="text-xs text-center py-4" style={{ color: "#666" }}>
+                  Keine Medien gefunden.
+                </p>
               ) : (
                 <>
-                  {slides.length > 0 && (
+                  {filteredSlides.length > 0 && (
                     <div>
                       <p className="text-[10px] uppercase tracking-widest mb-2" style={{ color: "#555" }}>
                         Images
                       </p>
                       <div className="space-y-1">
-                        {slides.map((slide) => (
+                        {filteredSlides.map((slide) => (
                           <button
                             key={slide.id}
                             onClick={() => onAdd("image", slide.id)}
                             className="w-full flex items-center gap-2 p-2 rounded-lg text-left transition-all hover:bg-[#222]"
                             style={{ background: "#141414", border: "1px solid #222" }}
                           >
-                            <span className="text-lg">🖼️</span>
+                            <span className="text-lg">ðŸ–¼ï¸</span>
                             <span className="text-xs truncate" style={{ color: "#ccc" }}>
                               {slide.name}
                             </span>
@@ -844,20 +907,20 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, on
                       </div>
                     </div>
                   )}
-                  {videos.length > 0 && (
+                  {filteredVideos.length > 0 && (
                     <div>
                       <p className="text-[10px] uppercase tracking-widest mb-2" style={{ color: "#555" }}>
                         Videos
                       </p>
                       <div className="space-y-1">
-                        {videos.map((video) => (
+                        {filteredVideos.map((video) => (
                           <button
                             key={video.id}
                             onClick={() => onAdd("video", video.id)}
                             className="w-full flex items-center gap-2 p-2 rounded-lg text-left transition-all hover:bg-[#222]"
                             style={{ background: "#141414", border: "1px solid #222" }}
                           >
-                            <span className="text-lg">🎬</span>
+                            <span className="text-lg">ðŸŽ¬</span>
                             <span className="text-xs truncate" style={{ color: "#ccc" }}>
                               {video.name}
                             </span>
@@ -877,15 +940,19 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, on
                 <p className="text-xs text-center py-4" style={{ color: "#666" }}>
                   No songs available. Create songs first.
                 </p>
+              ) : filteredSongs.length === 0 ? (
+                <p className="text-xs text-center py-4" style={{ color: "#666" }}>
+                  Keine Lieder gefunden.
+                </p>
               ) : (
-                songs.map((song) => (
+                filteredSongs.map((song) => (
                   <button
                     key={song.id}
                     onClick={() => onAdd("song", song.id)}
                     className="w-full flex items-center gap-2 p-2 rounded-lg text-left transition-all hover:bg-[#222]"
                     style={{ background: "#141414", border: "1px solid #222" }}
                   >
-                    <span className="text-lg">🎵</span>
+                    <span className="text-lg">ðŸŽµ</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-xs truncate" style={{ color: "#ccc" }}>
                         {song.title}
@@ -906,17 +973,21 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, on
             <div className="space-y-1">
               {pdfGroups.length === 0 ? (
                 <p className="text-xs text-center py-4" style={{ color: "#666" }}>
-                  Keine PowerPoint-Präsentationen verfügbar. Importiere PDFs zuerst.
+                  Keine PowerPoint-PrÃ¤sentationen verfÃ¼gbar. Importiere PDFs zuerst.
+                </p>
+              ) : filteredPdfGroups.length === 0 ? (
+                <p className="text-xs text-center py-4" style={{ color: "#666" }}>
+                  Keine PowerPoint-PrÃ¤sentationen gefunden.
                 </p>
               ) : (
-                pdfGroups.map((group) => (
+                filteredPdfGroups.map((group) => (
                   <button
                     key={group.id}
                     onClick={() => onAdd("pdf", group.id)}
                     className="w-full flex items-center gap-2 p-2 rounded-lg text-left transition-all hover:bg-[#222]"
                     style={{ background: "#141414", border: "1px solid #222" }}
                   >
-                    <span className="text-lg">📊</span>
+                    <span className="text-lg">ðŸ“Š</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-xs truncate" style={{ color: "#ccc" }}>
                         {group.name}
@@ -938,7 +1009,7 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, on
                 className="w-full flex items-center gap-2 p-3 rounded-lg transition-all hover:bg-[#222]"
                 style={{ background: "#141414", border: "1px solid #222" }}
               >
-                <span className="text-2xl">⏱️</span>
+                <span className="text-2xl">â±ï¸</span>
                 <div className="text-left">
                   <p className="text-sm font-medium" style={{ color: "#ccc" }}>
                     Add Countdown
@@ -953,25 +1024,31 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, on
 
           {activeSection === "music" && (
             <div className="space-y-4">
+              {music.length === 0 && playlists.length === 0 ? (
+                <p className="text-xs text-center py-4" style={{ color: "#666" }}>
+                  Keine Musik verfuegbar. Fuege zuerst Musik im Musik-Tab hinzu.
+                </p>
+              ) : !hasMusicMatches ? (
+                <p className="text-xs text-center py-4" style={{ color: "#666" }}>
+                  Keine Musik gefunden.
+                </p>
+              ) : null}
+
               {/* Single Tracks */}
+              {filteredMusic.length > 0 && (
               <div>
                 <p className="text-[10px] uppercase tracking-widest mb-2" style={{ color: "#555" }}>
                   Einzelne Lieder
                 </p>
                 <div className="space-y-1">
-                  {music.length === 0 ? (
-                    <p className="text-xs text-center py-4" style={{ color: "#666" }}>
-                      Keine Musik verfügbar. Füge zuerst Musik im Musik-Tab hinzu.
-                    </p>
-                  ) : (
-                    music.map((track) => (
+                  {filteredMusic.map((track) => (
                       <button
                         key={track.id}
                         onClick={() => onAdd("music", undefined, { musicTrackId: track.id })}
                         className="w-full flex items-center gap-2 p-2 rounded-lg text-left transition-all hover:bg-[#222]"
                         style={{ background: "#141414", border: "1px solid #222" }}
                       >
-                        <span className="text-lg">🎶</span>
+                        <span className="text-lg">ðŸŽ¶</span>
                         <div className="flex-1 min-w-0">
                           <p className="text-xs truncate" style={{ color: "#ccc" }}>
                             {track.name}
@@ -983,26 +1060,26 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, on
                           )}
                         </div>
                       </button>
-                    ))
-                  )}
+                    ))}
                 </div>
               </div>
+              )}
 
               {/* Playlists */}
-              {playlists.length > 0 && (
+              {filteredPlaylists.length > 0 && (
                 <div>
                   <p className="text-[10px] uppercase tracking-widest mb-2" style={{ color: "#555" }}>
                     Playlists
                   </p>
                   <div className="space-y-1">
-                    {playlists.map((playlist) => (
+                    {filteredPlaylists.map((playlist) => (
                       <button
                         key={playlist.id}
                         onClick={() => onAdd("playlist", undefined, { playlistId: playlist.id })}
                         className="w-full flex items-center gap-2 p-2 rounded-lg text-left transition-all hover:bg-[#222]"
                         style={{ background: "#141414", border: "1px solid #222" }}
                       >
-                        <span className="text-lg">📀</span>
+                        <span className="text-lg">ðŸ“€</span>
                         <div className="flex-1 min-w-0">
                           <p className="text-xs truncate" style={{ color: "#ccc" }}>
                             {playlist.name}
@@ -1024,9 +1101,9 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, on
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Slide Grid Component (Pro Presenter Style)
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface SlideGridProps {
   item: ShowItem;

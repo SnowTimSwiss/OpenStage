@@ -9,6 +9,7 @@ const MODE_LABELS: Record<string, string> = {
   video: "Video",
   song: "Liedtext",
   countdown: "Countdown",
+  music: "Musik",
 };
 
 function formatTime(date: Date): string {

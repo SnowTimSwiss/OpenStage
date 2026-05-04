@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { open as openFile } from "@tauri-apps/plugin-dialog";
 import { useStore } from "../../store/useStore";
 import type { MusicItem, Playlist } from "../../types";
 
@@ -11,6 +13,7 @@ export default function MusicTab() {
   const musicVolume = useStore((s) => s.musicVolume);
   const playlists = useStore((s) => s.playlists);
   const activePlaylistId = useStore((s) => s.activePlaylistId);
+  const musicBackgroundImage = useStore((s) => s.musicBackgroundImage);
 
   const loadMusic = useStore((s) => s.loadMusic);
   const loadMusicFromFolder = useStore((s) => s.loadMusicFromFolder);
@@ -26,6 +29,7 @@ export default function MusicTab() {
   const createPlaylist = useStore((s) => s.createPlaylist);
   const setActivePlaylist = useStore((s) => s.setActivePlaylist);
   const addTrackToPlaylist = useStore((s) => s.addTrackToPlaylist);
+  const setMusicBackgroundImage = useStore((s) => s.setMusicBackgroundImage);
   const setError = useStore((s) => s.setError);
 
   const [showCreatePlaylist, setShowCreatePlaylist] = useState(false);
@@ -135,6 +139,24 @@ export default function MusicTab() {
     addTrackToPlaylist(playlist.id, track);
   }
 
+  async function handleSetBackgroundImage() {
+    try {
+      const file = await openFile({
+        multiple: false,
+        filters: [{ name: "Bilder", extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp"] }],
+      });
+      if (!file) return;
+      setMusicBackgroundImage(convertFileSrc(file as string));
+    } catch (err) {
+      console.error("Failed to set music background image:", err);
+      setError("Hintergrundbild konnte nicht geladen werden");
+    }
+  }
+
+  function handleClearBackgroundImage() {
+    setMusicBackgroundImage(null);
+  }
+
   return (
     <div className="flex flex-col h-full">
       {/* Header with Playlist Selector */}
@@ -158,6 +180,30 @@ export default function MusicTab() {
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleSetBackgroundImage}
+            className="text-xs px-3 py-1.5 rounded font-medium"
+            style={{
+              background: musicBackgroundImage ? "#22c55e20" : "#252525",
+              color: musicBackgroundImage ? "#22c55e" : "#aaa",
+              border: "1px solid #333",
+            }}
+            title="Hintergrundbild fuer Musik-Ausgabe auswaehlen"
+          >
+            {musicBackgroundImage ? "✓ Hintergrund" : "Hintergrund"}
+          </button>
+
+          {musicBackgroundImage && (
+            <button
+              onClick={handleClearBackgroundImage}
+              className="text-xs px-3 py-1.5 rounded font-medium"
+              style={{ background: "#252525", color: "#ef4444", border: "1px solid #333" }}
+              title="Hintergrundbild entfernen"
+            >
+              Entfernen
+            </button>
+          )}
+
           {/* Create Playlist Button */}
           <button
             onClick={() => setShowCreatePlaylist(true)}

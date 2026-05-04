@@ -36,7 +36,7 @@ export default function MusicOverlay() {
   if (!current) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50">
+    <div className="fixed bottom-4 right-4 z-[70]">
       <div
         className="rounded-xl border shadow-2xl overflow-hidden"
         style={{

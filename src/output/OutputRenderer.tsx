@@ -193,10 +193,19 @@ export default function OutputRenderer({
   if (mode === "music" && state.music) {
     return (
       <div
-        className={`${rootClassName} bg-black flex items-center justify-center transition-opacity duration-300`}
-        style={transitionStyle}
+        className={`${rootClassName} bg-black flex items-center justify-center transition-opacity duration-300 relative overflow-hidden`}
+        style={{
+          ...transitionStyle,
+          backgroundImage: state.music.backgroundImage ? `url(${state.music.backgroundImage})` : undefined,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          backgroundRepeat: "no-repeat",
+        }}
       >
-        <div className="text-center">
+        {state.music.backgroundImage && (
+          <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.58)" }} />
+        )}
+        <div className="relative z-10 text-center px-12">
           {state.music.trackName && (
             <p
               className="text-white font-medium mb-2"

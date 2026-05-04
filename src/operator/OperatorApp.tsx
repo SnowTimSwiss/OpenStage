@@ -9,6 +9,7 @@ import MusicTab from "./tabs/MusicTab";
 import DisplayTab from "./tabs/DisplayTab";
 import ShowTab from "./tabs/ShowTab";
 import OutputRenderer from "../output/OutputRenderer";
+import MusicOverlay from "./MusicOverlay";
 import { getSongPresentation } from "../lib/songPresentation";
 import type { OutputPayload } from "../types";
 
@@ -62,6 +63,7 @@ export default function OperatorApp() {
         </main>
         {activeTab !== "show" && <PreviewPanel />}
       </div>
+      <MusicOverlay />
     </div>
   );
 }

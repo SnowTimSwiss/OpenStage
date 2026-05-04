@@ -21,7 +21,7 @@ import {
 } from "../lib/github";
 import type {
   Song, MediaItem, MusicItem, Playlist, MusicSource,
-  Monitor, TabId, OutputMode, PdfGroup, CountdownTheme, ShowItem,
+  Monitor, TabId, OutputMode, OutputPayload, PdfGroup, CountdownTheme, ShowItem,
   RepositorySong,
 } from "../types";
 
@@ -45,6 +45,7 @@ let countdownBgStartOffsetSeconds = 0;
 let countdownEndTime: number | null = null;
 let countdownFadeOutTimeout: ReturnType<typeof setTimeout> | null = null;
 let outputReadyListenerInitialized = false;
+let blackoutRestorePayload: OutputPayload | null = null;
 
 function formatUnknownError(err: unknown): string {
   if (err instanceof Error) return `${err.name}: ${err.message}`;
@@ -590,6 +591,8 @@ interface Store {
   musicCurrentTime: number;
   musicDuration: number;
   musicFadeDuration: number; // seconds for fade in/out
+  musicBackgroundImage: string | null;
+  setMusicBackgroundImage: (src: string | null) => void;
   loadMusic: (playlistId?: string | null) => Promise<void>;
   loadMusicFromFolder: (playlistId?: string | null) => Promise<void>;
   resetAllMusic: () => void;
@@ -666,11 +669,24 @@ export const useStore = create<Store>((set, get) => ({
 
   toggleBlackout: () => {
     const next = !get().isBlackout;
-    set({ isBlackout: next });
-    sendToOutput({ mode: next ? "blackout" : "blank" });
+    if (next) {
+      const currentPayload = getLastOutputPayload();
+      if (currentPayload.mode !== "blackout") {
+        blackoutRestorePayload = currentPayload;
+      }
+      set({ isBlackout: true });
+      sendToOutput({ mode: "blackout" });
+      return;
+    }
+
+    const restorePayload = blackoutRestorePayload ?? { mode: "blank" };
+    blackoutRestorePayload = null;
+    set({ isBlackout: false, outputMode: restorePayload.mode === "blackout" ? "blank" : restorePayload.mode });
+    sendToOutput(restorePayload.mode === "blackout" ? { mode: "blank" } : restorePayload);
   },
 
   clearOutput: () => {
+    blackoutRestorePayload = null;
     set({ outputMode: "blank", isBlackout: false, activeSlideId: null, activeVideoId: null });
     sendToOutput({ mode: "blank" });
   },
@@ -1276,8 +1292,10 @@ export const useStore = create<Store>((set, get) => ({
   musicCurrentTime: 0,
   musicDuration: 0,
   musicFadeDuration: 2, // 2 seconds default fade
+  musicBackgroundImage: null,
 
   setMusicFadeDuration: (s) => set({ musicFadeDuration: s }),
+  setMusicBackgroundImage: (src) => set({ musicBackgroundImage: src }),
 
   loadMusic: async (playlistId?: string | null) => {
     const { setLoading, setError, clearError, playlists, addTrackToPlaylist } = get();
@@ -1986,6 +2004,7 @@ export const useStore = create<Store>((set, get) => ({
           countdownDisplayAfterZeroSeconds: parsed.countdownDisplayAfterZeroSeconds ?? 10,
           outputMonitorIndices: parsed.outputMonitorIndices ?? [],
           songBackgroundImage: parsed.songBackgroundImage ?? null,
+          musicBackgroundImage: parsed.musicBackgroundImage ?? null,
         });
       }
     } catch {
@@ -2014,6 +2033,7 @@ export const useStore = create<Store>((set, get) => ({
         countdownDisplayAfterZeroSeconds,
         outputMonitorIndices,
         songBackgroundImage,
+        musicBackgroundImage,
       } = get();
       localStorage.setItem(
         STORAGE_KEY,
@@ -2030,6 +2050,7 @@ export const useStore = create<Store>((set, get) => ({
           countdownDisplayAfterZeroSeconds,
           outputMonitorIndices,
           songBackgroundImage,
+          musicBackgroundImage,
         })
       );
     } catch {
@@ -2275,7 +2296,8 @@ useStore.subscribe((state, prevState) => {
     state.countdownBackgroundMusicFadeInStartMinutes !== prevState.countdownBackgroundMusicFadeInStartMinutes ||
     state.countdownBackgroundMusicFullVolumeMinutes !== prevState.countdownBackgroundMusicFullVolumeMinutes ||
     state.countdownDisplayAfterZeroSeconds !== prevState.countdownDisplayAfterZeroSeconds ||
-    state.songBackgroundImage !== prevState.songBackgroundImage;
+    state.songBackgroundImage !== prevState.songBackgroundImage ||
+    state.musicBackgroundImage !== prevState.musicBackgroundImage;
 
   if (changed) state.saveSettings();
 

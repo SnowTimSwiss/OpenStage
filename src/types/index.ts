@@ -102,6 +102,7 @@ export interface OutputPayload {
     playing?: boolean;
     trackName?: string;
     artist?: string;
+    backgroundImage?: string | null;
   };
 }
 
