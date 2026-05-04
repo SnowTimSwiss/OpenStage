@@ -14,15 +14,9 @@ import {
 } from "../lib/events";
 import { secondsUntilTargetTime } from "../lib/formatTime";
 import { getSongEffectiveSlideCount, getSongPresentation } from "../lib/songPresentation";
-import {
-  fetchRepoContents,
-  downloadSong,
-  processRepositoryContents,
-} from "../lib/github";
 import type {
   Song, MediaItem, MusicItem, Playlist, MusicSource,
   Monitor, TabId, OutputMode, OutputPayload, PdfGroup, CountdownTheme, ShowItem,
-  RepositorySong,
 } from "../types";
 
 const STORAGE_KEY = "openstage-settings-v1";
@@ -535,10 +529,6 @@ interface Store {
   prevSongSlide: () => void;
 
   // ── GitHub Repository ─────────────────────────────────────────────────
-  githubRepoOwner: string;
-  githubRepoName: string;
-  fetchRepositorySongs: () => Promise<RepositorySong[]>;
-  downloadRepositorySong: (song: RepositorySong) => Promise<Song>;
 
   // ── Countdown ──────────────────────────────────────────────────────────
   countdownRemaining: number;
@@ -1000,31 +990,6 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   // ── GitHub Repository ─────────────────────────────────────────────────
-  githubRepoOwner: "SnowTimSwiss",
-  githubRepoName: "OpenStage-songs",
-
-  fetchRepositorySongs: async () => {
-    const { songs: localSongs } = get();
-    try {
-      const contents = await fetchRepoContents();
-      return await processRepositoryContents(contents, localSongs);
-    } catch (err) {
-      console.error("Failed to fetch repository songs:", err);
-      throw err;
-    }
-  },
-
-  downloadRepositorySong: async (repositorySong: RepositorySong) => {
-    const { addSong } = get();
-    try {
-      const songData = await downloadSong(repositorySong.apiUrl);
-      addSong(songData);
-      return songData;
-    } catch (err) {
-      console.error("Failed to download song:", err);
-      throw err;
-    }
-  },
 
   // ── Countdown ──────────────────────────────────────────────────────────
   countdownRemaining: 0,

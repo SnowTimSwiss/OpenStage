@@ -18,15 +18,10 @@ Alle wesentlichen Änderungen an OpenStage werden in dieser Datei dokumentiert.
 ## [1.3.0] - 2026-03-22
 
 ### Hinzugefügt
-- **GitHub Songs Repository** – Zentrale Song-Bibliothek zum Teilen
-  - Songs aus GitHub Repository herunterladen (ohne Login)
-  - Eigene Songs ins Repository hochladen (mit GitHub Token)
-  - Repository Modal mit Übersicht aller verfügbarer Songs
-  - Download-Status Anzeige (lokal verfügbar / nicht heruntergeladen)
-  - GitHub Authentication mit Personal Access Token (PAT)
-  - Upload-Validierung (Titel, Folien, Textlänge)
-  - CC0-1.0 Lizenz (Public Domain)
-  - Link zum Repository: https://github.com/SnowTimSwiss/OpenStage-songs
+- **Song-Import/Export** – Lokale Songs als JSON sichern und wieder laden
+  - Songs per JSON-Datei importieren
+  - Songs per JSON-Datei exportieren
+  - Beispiel-Datei `example-song.json`
 - **Auto-Save Persistenz** – Daten bleiben über Neustarts erhalten
   - Media-Bibliothek (Bilder, Videos) wird automatisch gespeichert
   - Show Queue wird automatisch gespeichert
@@ -51,11 +46,6 @@ Alle wesentlichen Änderungen an OpenStage werden in dieser Datei dokumentiert.
   - Scrollbar nur im Grid-Bereich
   - Grid von 4 auf 2 Spalten reduziert (kompakter)
   - Kleinere Schriftarten für bessere Übersicht
-
-### Sicherheit
-- Upload-Validierung für Songs (keine zu langen Texte)
-- Explizite Bestätigung vor GitHub Uploads
-- Token nur mit "repo" Berechtigung
 
 ## [1.2.0] - 2026-03-21
 
