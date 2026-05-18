@@ -619,7 +619,6 @@ function buildOutputPayload(
   }
 ): OutputPayload {
   const { slides, videos, songs, pdfGroups, countdownRemaining, countdownLabel, countdownTheme, music, playlists } = data;
-  const showAllSongSlides = useStore.getState().showAllSongSlides;
   const songBackgroundImage = useStore.getState().songBackgroundImage;
   const musicBackgroundImage = useStore.getState().musicBackgroundImage;
 
@@ -635,8 +634,7 @@ function buildOutputPayload(
     case "song": {
       const song = songs.find((s) => s.id === item.refId);
       if (!song) return { mode: "blank" };
-      const effectiveSong = showAllSongSlides ? { ...song, combineSlides: true } : song;
-      const presentation = getSongPresentation(effectiveSong, item.slideIndex ?? 0);
+      const presentation = getSongPresentation(song, item.slideIndex ?? 0);
       if (presentation.total <= 0) return { mode: "blank" };
       return {
         mode: "song",
@@ -647,7 +645,7 @@ function buildOutputPayload(
           index: presentation.index,
           total: presentation.total,
           backgroundImage: songBackgroundImage,
-          allSlides: Boolean(effectiveSong.combineSlides),
+          allSlides: Boolean(song.combineSlides),
         },
       };
     }
@@ -1114,16 +1112,14 @@ interface SlideGridProps {
 
 function SlideGrid({ item, songs, pdfGroups, onSelectSlide }: SlideGridProps) {
   const currentSlideIndex = item.slideIndex ?? 0;
-  const showAllSongSlides = useStore((s) => s.showAllSongSlides);
 
   // Get slides for song
   if (item.type === "song" && item.refId) {
     const song = songs.find((s) => s.id === item.refId);
     if (!song || !song.slides) return null;
 
-    const effectiveSong = showAllSongSlides ? { ...song, combineSlides: true } : song;
-    if (getSongEffectiveSlideCount(effectiveSong) === 1) {
-      const presentation = getSongPresentation(effectiveSong, 0);
+    if (getSongEffectiveSlideCount(song) === 1) {
+      const presentation = getSongPresentation(song, 0);
 
       return (
         <div className="space-y-2">

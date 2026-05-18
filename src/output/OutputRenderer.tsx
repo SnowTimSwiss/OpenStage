@@ -114,15 +114,28 @@ export default function OutputRenderer({
   if (mode === "song" && state.song) {
     const isAllSlides = state.song.allSlides === true;
     const songFontSizeValue = compact 
-      ? (isAllSlides ? "clamp(0.65rem, 1.3vw, 0.95rem)" : "clamp(0.75rem, 1.6vw, 1.15rem)")
-      : (isAllSlides ? "clamp(1.25rem, 3vw, 2.5rem)" : "clamp(2rem, 5vw, 5rem)");
-    
+      ? (isAllSlides ? "clamp(0.6rem, 1.15vw, 0.85rem)" : "clamp(0.75rem, 1.6vw, 1.15rem)")
+      : (isAllSlides ? "clamp(1rem, 2.35vw, 2rem)" : "clamp(2rem, 5vw, 5rem)");
+    const songTextBlocks = state.song.text
+      .split(/\n{2,}/)
+      .map((block) => block.trim())
+      .filter(Boolean);
+    const songTextColumns = songTextBlocks.reduce<string[][]>(
+      (columns, block) => {
+        const leftLength = columns[0].join("\n").length;
+        const rightLength = columns[1].join("\n").length;
+        columns[leftLength <= rightLength ? 0 : 1].push(block);
+        return columns;
+      },
+      [[], []]
+    );
+
     // Bei ganzen Liedern: Text in Spalten aufteilen für bessere Lesbarkeit
     const gridColumnStyle = isAllSlides && !compact
       ? {
-          columnCount: 2,
-          columnGap: "3rem",
           textAlign: "center" as const,
+          maxWidth: "84rem",
+          width: "100%",
         }
       : {};
     
@@ -145,20 +158,49 @@ export default function OutputRenderer({
           }}
         />
 
-        <div className="relative z-10 flex flex-col items-center justify-center w-full h-full">
-          <p
-            className="text-white leading-snug whitespace-pre-line"
-            style={{
-              fontSize: songFontSizeValue,
-              fontFamily: "'Sora', sans-serif",
-              fontWeight: 300,
-              textShadow: "0 2px 20px rgba(0,0,0,0.8)",
-              letterSpacing: "0.01em",
-              ...gridColumnStyle,
-            }}
-          >
-            {state.song.text}
-          </p>
+        <div className="relative z-10 flex flex-col items-center justify-center w-full h-full pb-24">
+          {isAllSlides ? (
+            <div
+              className="grid grid-cols-2 gap-x-16 text-white leading-snug"
+              style={{
+                fontSize: songFontSizeValue,
+                fontFamily: "'Sora', sans-serif",
+                fontWeight: 300,
+                textShadow: "0 2px 20px rgba(0,0,0,0.8)",
+                letterSpacing: "0.01em",
+                ...gridColumnStyle,
+              }}
+            >
+              {songTextColumns.map((column, columnIndex) => (
+                <div key={columnIndex}>
+                  {column.map((block, blockIndex) => (
+                    <p
+                      key={`${columnIndex}-${blockIndex}`}
+                      className="whitespace-pre-line"
+                      style={{
+                        marginBottom: blockIndex === column.length - 1 ? 0 : "0.9em",
+                      }}
+                    >
+                      {block}
+                    </p>
+                  ))}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p
+              className="text-white leading-snug whitespace-pre-line"
+              style={{
+                fontSize: songFontSizeValue,
+                fontFamily: "'Sora', sans-serif",
+                fontWeight: 300,
+                textShadow: "0 2px 20px rgba(0,0,0,0.8)",
+                letterSpacing: "0.01em",
+              }}
+            >
+              {state.song.text}
+            </p>
+          )}
         </div>
 
         {/* Artist / Titel unten links */}

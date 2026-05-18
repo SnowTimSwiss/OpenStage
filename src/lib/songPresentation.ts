@@ -2,19 +2,7 @@ import type { Song } from "../types";
 
 function formatCombinedSlideText(song: Song): string {
   return song.slides
-    .map((slide) => {
-      const parts = [];
-
-      if (slide.label?.trim()) {
-        parts.push(slide.label.trim());
-      }
-
-      if (slide.text?.trim()) {
-        parts.push(slide.text.trim());
-      }
-
-      return parts.join("\n");
-    })
+    .map((slide) => slide.text?.trim() ?? "")
     .filter(Boolean)
     .join("\n\n");
 }

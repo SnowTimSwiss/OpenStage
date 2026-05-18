@@ -4,7 +4,7 @@ import type { Song, SongSlide } from "../../types";
 import { save as saveFile, open as openFile } from "@tauri-apps/plugin-dialog";
 import { writeFile, readFile } from "@tauri-apps/plugin-fs";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { getSongEffectiveSlideCount } from "../../lib/songPresentation";
+import { getSongEffectiveSlideCount, getSongPresentation } from "../../lib/songPresentation";
 
 type View = "list" | "editor" | "live";
 
@@ -18,7 +18,6 @@ export default function SongsTab() {
   const songs = useStore((s) => s.songs);
   const activeSongId = useStore((s) => s.activeSongId);
   const activeSongSlide = useStore((s) => s.activeSongSlide);
-  const showAllSongSlides = useStore((s) => s.showAllSongSlides);
   const songBackgroundImage = useStore((s) => s.songBackgroundImage);
   const addSong = useStore((s) => s.addSong);
   const updateSong = useStore((s) => s.updateSong);
@@ -188,7 +187,7 @@ export default function SongsTab() {
 	          <label className="flex items-center gap-2 cursor-pointer">
 	            <input
 	              type="checkbox"
-	              checked={showAllSongSlides}
+              checked={Boolean(activeSong.combineSlides)}
 	              onChange={(e) => {
 	                const checked = e.target.checked;
 	                updateSong(activeSong.id, {
@@ -209,12 +208,12 @@ export default function SongsTab() {
 	          </label>
 	          
 	          <span className="text-xs" style={{ color: "#555" }}>
-	            {showAllSongSlides ? 1 : activeSongSlide + 1} / {showAllSongSlides ? 1 : activeSong.slides.length}
+	            {activeSong.combineSlides ? 1 : activeSongSlide + 1} / {activeSong.combineSlides ? 1 : activeSong.slides.length}
 	          </span>
         </div>
 
         {/* Slide grid */}
-        {showAllSongSlides ? (
+        {activeSong.combineSlides ? (
           /* Vorschau des ganzen Liedes - 2 Spalten wie im Output */
           <div className="flex-1 overflow-y-auto p-4">
             <div className="rounded-lg p-6" style={{ background: "#141414", border: "1px solid #f9731640" }}>
@@ -233,12 +232,7 @@ export default function SongsTab() {
                   letterSpacing: "0.01em",
                 }}
               >
-                {activeSong.slides.map((slide, i) => (
-                  <span key={slide.id}>
-                    {slide.text}
-                    {i < activeSong.slides.length - 1 && "\n\n"}
-                  </span>
-                ))}
+                {getSongPresentation(activeSong, 0).text}
               </div>
             </div>
           </div>
@@ -282,7 +276,7 @@ export default function SongsTab() {
         )}
 
         {/* Arrow controls - nur im Einzel Folien-Modus */}
-        {!showAllSongSlides && (
+        {!activeSong.combineSlides && (
           <div className="flex gap-2 p-3 border-t" style={{ borderColor: "#252525" }}>
             <button
               onClick={prevSongSlide}

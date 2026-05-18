@@ -944,11 +944,9 @@ export const useStore = create<Store>((set, get) => ({
   goLiveSongSlide: (songId, index) => {
     const song = get().songs.find((s) => s.id === songId);
     const songBackgroundImage = get().songBackgroundImage;
-    const showAllSongSlides = get().showAllSongSlides;
     if (!song || song.slides.length === 0) return;
 
-    const effectiveSong = showAllSongSlides ? { ...song, combineSlides: true } : song;
-    const presentation = getSongPresentation(effectiveSong, index);
+    const presentation = getSongPresentation(song, index);
     set({
       activeSongId: songId,
       activeSongSlide: presentation.index,
@@ -965,18 +963,17 @@ export const useStore = create<Store>((set, get) => ({
         backgroundImage: songBackgroundImage,
         index: presentation.index,
         total: presentation.total,
-        allSlides: Boolean(effectiveSong.combineSlides),
+        allSlides: Boolean(song.combineSlides),
       },
     });
   },
 
   nextSongSlide: () => {
-    const { activeSongId, activeSongSlide, songs, goLiveSongSlide, showAllSongSlides } = get();
+    const { activeSongId, activeSongSlide, songs, goLiveSongSlide } = get();
     if (!activeSongId) return;
     const song = songs.find((s) => s.id === activeSongId);
     if (!song) return;
-    const effectiveSong = showAllSongSlides ? { ...song, combineSlides: true } : song;
-    const next = Math.min(activeSongSlide + 1, Math.max(0, getSongEffectiveSlideCount(effectiveSong) - 1));
+    const next = Math.min(activeSongSlide + 1, Math.max(0, getSongEffectiveSlideCount(song) - 1));
     goLiveSongSlide(activeSongId, next);
   },
 
@@ -1843,23 +1840,16 @@ export const useStore = create<Store>((set, get) => ({
 
   showNextSlide: () => {
     const state = get();
-    const { showQueue, showCurrentIndex, songs, pdfGroups, showAllSongSlides } = state;
+    const { showQueue, showCurrentIndex, songs, pdfGroups } = state;
     if (showQueue.length === 0 || showCurrentIndex < 0) return;
 
     const currentItem = showQueue[showCurrentIndex];
-
-    // Wenn alle Folien angezeigt werden, direkt zum nächsten Item springen
-    if (showAllSongSlides && currentItem.type === "song") {
-      state.showNext();
-      return;
-    }
 
     // For songs: increment slide index
     if (currentItem.type === "song" && currentItem.refId) {
       const song = songs.find((s) => s.id === currentItem.refId);
       if (song) {
-        const effectiveSong = showAllSongSlides ? { ...song, combineSlides: true } : song;
-        const totalSlides = getSongEffectiveSlideCount(effectiveSong);
+        const totalSlides = getSongEffectiveSlideCount(song);
         if (totalSlides <= 1) {
           state.showNext();
           return;
@@ -1891,23 +1881,16 @@ export const useStore = create<Store>((set, get) => ({
 
   showPreviousSlide: () => {
     const state = get();
-    const { showQueue, showCurrentIndex, songs, pdfGroups, showAllSongSlides } = state;
+    const { showQueue, showCurrentIndex, songs, pdfGroups } = state;
     if (showQueue.length === 0 || showCurrentIndex < 0) return;
 
     const currentItem = showQueue[showCurrentIndex];
-
-    // Wenn alle Folien angezeigt werden, direkt zum vorherigen Item springen
-    if (showAllSongSlides && currentItem.type === "song") {
-      state.showPrevious();
-      return;
-    }
 
     // For songs: decrement slide index
     if (currentItem.type === "song" && currentItem.refId) {
       const song = songs.find((s) => s.id === currentItem.refId);
       if (song) {
-        const effectiveSong = showAllSongSlides ? { ...song, combineSlides: true } : song;
-        const totalSlides = getSongEffectiveSlideCount(effectiveSong);
+        const totalSlides = getSongEffectiveSlideCount(song);
         if (totalSlides <= 1) {
           state.showPrevious();
           return;

@@ -96,7 +96,6 @@ function PreviewPanel() {
   const musicCurrentTime = useStore((s) => s.musicCurrentTime);
   const musicDuration = useStore((s) => s.musicDuration);
   const musicVolume = useStore((s) => s.musicVolume);
-  const showAllSongSlides = useStore((s) => s.showAllSongSlides);
   const songBackgroundImage = useStore((s) => s.songBackgroundImage);
   const setMusicPlaying = useStore((s) => s.setMusicPlaying);
   const playNextMusic = useStore((s) => s.playNextMusic);
@@ -111,10 +110,7 @@ function PreviewPanel() {
     pdfGroups.flatMap((g) => g.pages).find((s) => s.id === activeSlideId);
   const activeVideo = videos.find((v) => v.id === activeVideoId);
   const currentMusic = music[musicIndex];
-  const previewSong = useMemo(
-    () => (activeSong ? (showAllSongSlides ? { ...activeSong, combineSlides: true } : activeSong) : null),
-    [activeSong, showAllSongSlides]
-  );
+  const previewSong = activeSong ?? null;
   const activeSongPresentation = previewSong ? getSongPresentation(previewSong, activeSongSlide) : null;
 
   const duration = musicDuration || 0;
