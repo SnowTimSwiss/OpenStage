@@ -17,6 +17,7 @@ import { getSongEffectiveSlideCount, getSongPresentation } from "../lib/songPres
 import type {
   Song, MediaItem, MusicItem, Playlist, MusicSource,
   Monitor, TabId, OutputMode, OutputPayload, PdfGroup, CountdownTheme, ShowItem,
+  Slideshow, SlideshowItem,
 } from "../types";
 
 const STORAGE_KEY = "openstage-settings-v1";
@@ -24,6 +25,7 @@ const PLAYLISTS_KEY = "openstage-playlists-v1";
 const LIBRARY_KEY = "openstage-library-v1";
 const MEDIA_STORAGE_KEY = "openstage-media-v1";
 const SHOW_STORAGE_KEY = "openstage-show-v1";
+const SLIDESHOWS_KEY = "openstage-slideshows-v1";
 
 let countdownInterval: ReturnType<typeof setInterval> | null = null;
 let musicAudio: HTMLAudioElement | null = null;
@@ -40,6 +42,8 @@ let countdownEndTime: number | null = null;
 let countdownFadeOutTimeout: ReturnType<typeof setTimeout> | null = null;
 let outputReadyListenerInitialized = false;
 let blackoutRestorePayload: OutputPayload | null = null;
+let slideshowTimer: ReturnType<typeof setTimeout> | null = null;
+let slideshowStartedMusic = false;
 
 function formatUnknownError(err: unknown): string {
   if (err instanceof Error) return `${err.name}: ${err.message}`;
@@ -630,6 +634,26 @@ interface Store {
   reorderShowQueue: (fromIndex: number, toIndex: number) => void;
   clearShowQueue: () => void;
   advanceShowOnMusicEnd: () => void; // advance show when music track ends
+
+  // ── Slideshow ──────────────────────────────────────────────────────────
+  slideshows: Slideshow[];
+  activeSlideshowId: string | null; // currently playing slideshow
+  slideshowRunIndex: number; // current image index within the playing slideshow
+  slideshowPlaying: boolean;
+  createSlideshow: (name: string) => Slideshow;
+  updateSlideshow: (id: string, updates: Partial<Omit<Slideshow, "id" | "items">>) => void;
+  removeSlideshow: (id: string) => void;
+  addImagesToSlideshow: (slideshowId: string, mediaIds: string[]) => void;
+  removeSlideshowItem: (slideshowId: string, itemId: string) => void;
+  reorderSlideshowItems: (slideshowId: string, fromIndex: number, toIndex: number) => void;
+  setSlideshowItemDuration: (slideshowId: string, itemId: string, duration: number) => void;
+  startSlideshow: (id: string) => void;
+  stopSlideshow: () => void;
+  pauseSlideshow: () => void;
+  resumeSlideshow: () => void;
+  slideshowNext: () => void;
+  slideshowPrev: () => void;
+  goToSlideshowFrame: (index: number) => void;
 
   // ── Persist & Reset ─────────────────────────────────────────────────────
   resetMedia: () => void;
@@ -1875,6 +1899,12 @@ export const useStore = create<Store>((set, get) => ({
       }
     }
 
+    // For slideshow: advance to the next image within the running slideshow
+    if (currentItem.type === "slideshow") {
+      state.slideshowNext();
+      return;
+    }
+
     // Otherwise: go to next item
     state.showNext();
   },
@@ -1913,6 +1943,12 @@ export const useStore = create<Store>((set, get) => ({
       }
     }
 
+    // For slideshow: go to the previous image within the running slideshow
+    if (currentItem.type === "slideshow") {
+      state.slideshowPrev();
+      return;
+    }
+
     // Otherwise: go to previous item
     state.showPrevious();
   },
@@ -1931,6 +1967,116 @@ export const useStore = create<Store>((set, get) => ({
       newQueue.splice(toIndex, 0, removed);
       return { showQueue: newQueue };
     });
+  },
+
+  // ── Slideshow ──────────────────────────────────────────────────────────
+  slideshows: [],
+  activeSlideshowId: null,
+  slideshowRunIndex: 0,
+  slideshowPlaying: false,
+
+  createSlideshow: (name) => {
+    const slideshow: Slideshow = {
+      id: crypto.randomUUID(),
+      name: name.trim() || "Neue Diashow",
+      items: [],
+      loop: true,
+      defaultDuration: 5,
+      backgroundPlaylistId: null,
+    };
+    set((s) => ({ slideshows: [...s.slideshows, slideshow] }));
+    return slideshow;
+  },
+
+  updateSlideshow: (id, updates) =>
+    set((s) => ({
+      slideshows: s.slideshows.map((show) =>
+        show.id === id ? { ...show, ...updates } : show
+      ),
+    })),
+
+  removeSlideshow: (id) => {
+    if (get().activeSlideshowId === id) stopSlideshowEngine({ clearOutput: true });
+    set((s) => ({
+      slideshows: s.slideshows.filter((show) => show.id !== id),
+      showQueue: s.showQueue.filter((item) => item.slideshowId !== id),
+    }));
+  },
+
+  addImagesToSlideshow: (slideshowId, mediaIds) =>
+    set((s) => ({
+      slideshows: s.slideshows.map((show) => {
+        if (show.id !== slideshowId) return show;
+        const newItems: SlideshowItem[] = mediaIds.map((mediaId) => ({
+          id: crypto.randomUUID(),
+          mediaId,
+          duration: show.defaultDuration,
+        }));
+        return { ...show, items: [...show.items, ...newItems] };
+      }),
+    })),
+
+  removeSlideshowItem: (slideshowId, itemId) =>
+    set((s) => ({
+      slideshows: s.slideshows.map((show) =>
+        show.id === slideshowId
+          ? { ...show, items: show.items.filter((item) => item.id !== itemId) }
+          : show
+      ),
+    })),
+
+  reorderSlideshowItems: (slideshowId, fromIndex, toIndex) =>
+    set((s) => ({
+      slideshows: s.slideshows.map((show) => {
+        if (show.id !== slideshowId) return show;
+        const items = [...show.items];
+        const [removed] = items.splice(fromIndex, 1);
+        items.splice(toIndex, 0, removed);
+        return { ...show, items };
+      }),
+    })),
+
+  setSlideshowItemDuration: (slideshowId, itemId, duration) =>
+    set((s) => ({
+      slideshows: s.slideshows.map((show) =>
+        show.id === slideshowId
+          ? {
+              ...show,
+              items: show.items.map((item) =>
+                item.id === itemId
+                  ? { ...item, duration: Math.max(1, Math.round(duration)) }
+                  : item
+              ),
+            }
+          : show
+      ),
+    })),
+
+  startSlideshow: (id) => startSlideshowEngine(id, 0),
+  stopSlideshow: () => stopSlideshowEngine({ clearOutput: true }),
+
+  pauseSlideshow: () => {
+    clearSlideshowTimer();
+    set({ slideshowPlaying: false });
+  },
+
+  resumeSlideshow: () => {
+    if (!get().activeSlideshowId) return;
+    set({ slideshowPlaying: true });
+    sendSlideshowFrame();
+    scheduleSlideshowAdvance();
+  },
+
+  slideshowNext: () => slideshowStep(1),
+  slideshowPrev: () => slideshowStep(-1),
+
+  goToSlideshowFrame: (index) => {
+    const show = getRunningSlideshow();
+    if (!show || show.items.length === 0) return;
+    const clamped = Math.max(0, Math.min(index, show.items.length - 1));
+    set({ slideshowRunIndex: clamped });
+    sendSlideshowFrame();
+    if (get().slideshowPlaying) scheduleSlideshowAdvance();
   },
 
   // ── Persist settings ────────────────────────────────────────────────────
@@ -2172,6 +2318,151 @@ function resetShow() {
   }
 }
 
+// ── Slideshow Engine & Persistence ──────────────────────────────
+
+function clearSlideshowTimer() {
+  if (slideshowTimer) {
+    clearTimeout(slideshowTimer);
+    slideshowTimer = null;
+  }
+}
+
+function getRunningSlideshow(): Slideshow | null {
+  const { slideshows, activeSlideshowId } = useStore.getState();
+  return slideshows.find((s) => s.id === activeSlideshowId) ?? null;
+}
+
+function resolveSlideshowFrameSrc(show: Slideshow, index: number): string | null {
+  const item = show.items[index];
+  if (!item) return null;
+  const slide = useStore.getState().slides.find((s) => s.id === item.mediaId);
+  return slide?.src ?? null;
+}
+
+/** Pushes the current slideshow image to the output (unless blacked out). */
+function sendSlideshowFrame() {
+  const show = getRunningSlideshow();
+  if (!show || show.items.length === 0) return;
+  const { slideshowRunIndex, isBlackout } = useStore.getState();
+  const src = resolveSlideshowFrameSrc(show, slideshowRunIndex);
+  if (!src) return;
+  useStore.setState({ outputMode: "image" });
+  if (!isBlackout) {
+    void sendToOutput({ mode: "image", image: { src } });
+  }
+}
+
+function scheduleSlideshowAdvance() {
+  clearSlideshowTimer();
+  const show = getRunningSlideshow();
+  if (!show || show.items.length === 0) return;
+  const { slideshowRunIndex } = useStore.getState();
+  const item = show.items[slideshowRunIndex];
+  const seconds = Math.max(1, item?.duration ?? show.defaultDuration ?? 5);
+  slideshowTimer = setTimeout(advanceSlideshowTick, seconds * 1000);
+}
+
+function advanceSlideshowTick() {
+  const show = getRunningSlideshow();
+  if (!show || show.items.length === 0) {
+    stopSlideshowEngine();
+    return;
+  }
+  const { slideshowRunIndex } = useStore.getState();
+  let next = slideshowRunIndex + 1;
+  if (next >= show.items.length) {
+    if (!show.loop) {
+      // Reached the end: stay on the last image and stop advancing.
+      clearSlideshowTimer();
+      useStore.setState({ slideshowPlaying: false });
+      return;
+    }
+    next = 0;
+  }
+  useStore.setState({ slideshowRunIndex: next });
+  sendSlideshowFrame();
+  scheduleSlideshowAdvance();
+}
+
+function slideshowStep(delta: number) {
+  const show = getRunningSlideshow();
+  if (!show || show.items.length === 0) return;
+  const { slideshowRunIndex, slideshowPlaying } = useStore.getState();
+  let next = slideshowRunIndex + delta;
+  if (next < 0) next = show.loop ? show.items.length - 1 : 0;
+  if (next >= show.items.length) next = show.loop ? 0 : show.items.length - 1;
+  useStore.setState({ slideshowRunIndex: next });
+  sendSlideshowFrame();
+  if (slideshowPlaying) scheduleSlideshowAdvance();
+}
+
+function startSlideshowEngine(id: string, startIndex = 0) {
+  const show = useStore.getState().slideshows.find((s) => s.id === id);
+  if (!show || show.items.length === 0) return;
+  clearSlideshowTimer();
+  useStore.setState({
+    activeSlideshowId: id,
+    slideshowRunIndex: Math.max(0, Math.min(startIndex, show.items.length - 1)),
+    slideshowPlaying: true,
+    isBlackout: false,
+  });
+  if (show.backgroundPlaylistId) {
+    useStore.getState().loadPlaylist(show.backgroundPlaylistId);
+    useStore.getState().setMusicPlaying(true);
+    slideshowStartedMusic = true;
+  }
+  sendSlideshowFrame();
+  scheduleSlideshowAdvance();
+}
+
+function stopSlideshowEngine(opts: { clearOutput?: boolean } = {}) {
+  clearSlideshowTimer();
+  if (slideshowStartedMusic) {
+    useStore.getState().setMusicPlaying(false);
+    slideshowStartedMusic = false;
+  }
+  useStore.setState({ slideshowPlaying: false });
+  if (opts.clearOutput && !useStore.getState().isBlackout) {
+    useStore.setState({ outputMode: "blank" });
+    void sendToOutput({ mode: "blank" });
+  }
+}
+
+function saveSlideshows() {
+  try {
+    const { slideshows } = useStore.getState();
+    localStorage.setItem(SLIDESHOWS_KEY, JSON.stringify(slideshows));
+  } catch {
+    console.warn("Could not save slideshows");
+  }
+}
+
+function loadSlideshows() {
+  try {
+    const saved = localStorage.getItem(SLIDESHOWS_KEY);
+    if (!saved) return;
+    const parsed = JSON.parse(saved);
+    if (!Array.isArray(parsed)) return;
+    const slideshows: Slideshow[] = parsed.map((show: Slideshow) => ({
+      id: show.id || crypto.randomUUID(),
+      name: show.name || "Diashow",
+      loop: show.loop !== false,
+      defaultDuration: typeof show.defaultDuration === "number" ? show.defaultDuration : 5,
+      backgroundPlaylistId: show.backgroundPlaylistId ?? null,
+      items: Array.isArray(show.items)
+        ? show.items.map((item) => ({
+            id: item.id || crypto.randomUUID(),
+            mediaId: item.mediaId,
+            duration: typeof item.duration === "number" ? item.duration : 5,
+          }))
+        : [],
+    }));
+    useStore.setState({ slideshows });
+  } catch {
+    console.warn("Could not load slideshows");
+  }
+}
+
 function initMusicEngine() {
   const a = ensureMusicAudio();
   if (!a) return;
@@ -2263,6 +2554,34 @@ useStore.subscribe((state, prevState) => {
   if (state.showQueue !== prevState.showQueue || state.showCurrentIndex !== prevState.showCurrentIndex) {
     saveShow();
   }
+
+  // Auto-save slideshows on change
+  if (state.slideshows !== prevState.slideshows) {
+    saveSlideshows();
+  }
+});
+
+// Start/stop the slideshow engine when the show navigates onto/off a slideshow item.
+useStore.subscribe((state, prevState) => {
+  if (!prevState) return;
+  if (
+    state.showCurrentIndex === prevState.showCurrentIndex &&
+    state.showQueue === prevState.showQueue
+  ) {
+    return;
+  }
+
+  const prevItem = prevState.showQueue[prevState.showCurrentIndex];
+  const curItem = state.showQueue[state.showCurrentIndex];
+  const prevIsSlideshow = prevItem?.type === "slideshow";
+  const curIsSlideshow = curItem?.type === "slideshow";
+
+  if (prevIsSlideshow && (!curIsSlideshow || prevItem.id !== curItem.id)) {
+    stopSlideshowEngine();
+  }
+  if (curIsSlideshow && curItem.slideshowId && (!prevIsSlideshow || prevItem.id !== curItem.id)) {
+    startSlideshowEngine(curItem.slideshowId, 0);
+  }
 });
 
 useStore.subscribe((state, prevState) => {
@@ -2310,6 +2629,7 @@ useStore.subscribe((state, prevState) => {
   if (typeof window !== "undefined") {
     initOutputReplayListener();
     useStore.getState().loadSettings();
+    loadSlideshows();
     initMusicEngine();
   }
 })();

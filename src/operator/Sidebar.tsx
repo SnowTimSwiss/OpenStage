@@ -4,6 +4,7 @@ import type { TabId } from "../types";
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "show", label: "Show", icon: "🎬" },
   { id: "media", label: "Medien", icon: "📁" },
+  { id: "slideshow", label: "Diashow", icon: "🎞️" },
   { id: "songs", label: "Lieder", icon: "🎵" },
   { id: "countdown", label: "Countdown", icon: "⏱️" },
   { id: "music", label: "Musik", icon: "🎧" },

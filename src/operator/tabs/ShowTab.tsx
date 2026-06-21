@@ -25,6 +25,8 @@ export default function ShowTab() {
 
   const showQueue = useStore((s) => s.showQueue);
   const showCurrentIndex = useStore((s) => s.showCurrentIndex);
+  const slideshows = useStore((s) => s.slideshows);
+  const slideshowRunIndex = useStore((s) => s.slideshowRunIndex);
   const addToShowQueue = useStore((s) => s.addToShowQueue);
   const removeFromShowQueue = useStore((s) => s.removeFromShowQueue);
   const setShowCurrentIndex = useStore((s) => s.setShowCurrentIndex);
@@ -96,10 +98,13 @@ export default function ShowTab() {
   // Send payload to output when it changes
   useEffect(() => {
     const current = useStore.getState();
+    // Slideshow items are driven by the slideshow engine in the store, which
+    // pushes each frame to the output itself — don't double-drive here.
+    const item = current.showQueue[current.showCurrentIndex];
+    if (item?.type === "slideshow") return;
     if (current.outputMode !== outputPayload.mode || current.isBlackout) {
       useStore.setState({ outputMode: outputPayload.mode, isBlackout: false });
     }
-    console.log("[ShowTab] Sending to output:", outputPayload);
     sendToOutput(outputPayload).catch((err) => {
       console.error("[ShowTab] Failed to send to output:", err);
     });
@@ -119,9 +124,13 @@ export default function ShowTab() {
           playlists,
         })
       : { mode: "blank" };
-  }, [currentItem, slides, videos, songs, pdfGroups, countdownRemaining, countdownLabel, countdownTheme, music, playlists]);
+  }, [currentItem, slides, videos, songs, pdfGroups, countdownRemaining, countdownLabel, countdownTheme, music, playlists, slideshows, slideshowRunIndex]);
 
-  function handleAddItem(type: ShowItem["type"], refId?: string, extra?: { musicTrackId?: string; playlistId?: string }) {
+  function handleAddItem(
+    type: ShowItem["type"],
+    refId?: string,
+    extra?: { musicTrackId?: string; playlistId?: string; slideshowId?: string }
+  ) {
     const label = getItemLabel(type, refId, slides, videos, songs, pdfGroups, music, playlists, extra);
     const item: ShowItem = {
       id: crypto.randomUUID(),
@@ -131,6 +140,7 @@ export default function ShowTab() {
       slideIndex: type === "song" || type === "pdf" ? 0 : undefined,
       musicTrackId: extra?.musicTrackId,
       playlistId: extra?.playlistId,
+      slideshowId: extra?.slideshowId,
     };
     addToShowQueue(item);
     setIsAddModalOpen(false);
@@ -561,6 +571,7 @@ export default function ShowTab() {
           pdfGroups={pdfGroups}
           music={music}
           playlists={playlists}
+          slideshows={slideshows}
           onAdd={handleAddItem}
           onClose={() => setIsAddModalOpen(false)}
         />
@@ -696,6 +707,17 @@ function buildOutputPayload(
         },
       };
     }
+    case "slideshow": {
+      // The slideshow engine drives the live output; this is only used for the
+      // operator preview, showing the current frame of the running slideshow.
+      const { slideshows, slideshowRunIndex, activeSlideshowId } = useStore.getState();
+      const show = slideshows.find((s) => s.id === item.slideshowId);
+      if (!show || show.items.length === 0) return { mode: "blank" };
+      const idx = activeSlideshowId === show.id ? slideshowRunIndex : 0;
+      const frame = show.items[Math.min(idx, show.items.length - 1)];
+      const slide = slides.find((s) => s.id === frame?.mediaId);
+      return slide ? { mode: "image", image: { src: slide.src } } : { mode: "blank" };
+    }
     default:
       return { mode: "blank" };
   }
@@ -717,6 +739,8 @@ function getItemIcon(type: ShowItem["type"]): string {
       return "🎶";
     case "playlist":
       return "📀";
+    case "slideshow":
+      return "🎞️";
   }
 }
 
@@ -729,7 +753,7 @@ function getItemLabel(
   pdfGroups: any[],
   music: any[],
   playlists: any[],
-  extra?: { musicTrackId?: string; playlistId?: string }
+  extra?: { musicTrackId?: string; playlistId?: string; slideshowId?: string }
 ): string {
   switch (type) {
     case "image": {
@@ -758,6 +782,11 @@ function getItemLabel(
       const playlist = extra?.playlistId ? playlists.find((p) => p.id === extra.playlistId) : null;
       return playlist ? `Playlist: ${playlist.name}` : "Playlist";
     }
+    case "slideshow": {
+      const slideshows = useStore.getState().slideshows;
+      const show = extra?.slideshowId ? slideshows.find((s) => s.id === extra.slideshowId) : null;
+      return show ? `Diashow: ${show.name}` : "Diashow";
+    }
   }
 }
 
@@ -768,12 +797,17 @@ interface AddToShowModalProps {
   pdfGroups: any[];
   music: any[];
   playlists: any[];
-  onAdd: (type: ShowItem["type"], refId?: string, extra?: { musicTrackId?: string; playlistId?: string }) => void;
+  slideshows: any[];
+  onAdd: (
+    type: ShowItem["type"],
+    refId?: string,
+    extra?: { musicTrackId?: string; playlistId?: string; slideshowId?: string }
+  ) => void;
   onClose: () => void;
 }
 
-function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, onAdd, onClose }: AddToShowModalProps) {
-  const [activeSection, setActiveSection] = useState<"media" | "songs" | "pdf" | "countdown" | "music">("media");
+function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, slideshows, onAdd, onClose }: AddToShowModalProps) {
+  const [activeSection, setActiveSection] = useState<"media" | "songs" | "pdf" | "countdown" | "music" | "slideshow">("media");
   const [searchQuery, setSearchQuery] = useState("");
   const normalizedSearch = searchQuery.trim().toLowerCase();
 
@@ -796,6 +830,7 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, on
   const filteredPlaylists = playlists.filter((playlist) =>
     matchesSearch(playlist.name, playlist.description, ...playlist.tracks.map((track: any) => `${track.name} ${track.artist ?? ""}`))
   );
+  const filteredSlideshows = slideshows.filter((show) => matchesSearch(show.name));
   const hasMediaMatches = filteredSlides.length > 0 || filteredVideos.length > 0;
   const hasMusicMatches = filteredMusic.length > 0 || filteredPlaylists.length > 0;
 
@@ -845,6 +880,14 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, on
             }`}
           >
             🎶 Musik
+          </button>
+          <button
+            onClick={() => setActiveSection("slideshow")}
+            className={`flex-1 text-xs py-2 transition-all ${
+              activeSection === "slideshow" ? "text-[#f97316] border-b-2 border-[#f97316]" : "text-[#888]"
+            }`}
+          >
+            🎞️ Diashow
           </button>
           <button
             onClick={() => setActiveSection("countdown")}
@@ -992,6 +1035,39 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, on
                       </p>
                       <p className="text-[9px] truncate" style={{ color: "#666" }}>
                         {group.pages.length} Seiten
+                      </p>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+
+          {activeSection === "slideshow" && (
+            <div className="space-y-1">
+              {slideshows.length === 0 ? (
+                <p className="text-xs text-center py-4" style={{ color: "#666" }}>
+                  Keine Diashows vorhanden. Erstelle eine im Diashow-Tab.
+                </p>
+              ) : filteredSlideshows.length === 0 ? (
+                <p className="text-xs text-center py-4" style={{ color: "#666" }}>
+                  Keine Diashows gefunden.
+                </p>
+              ) : (
+                filteredSlideshows.map((show) => (
+                  <button
+                    key={show.id}
+                    onClick={() => onAdd("slideshow", undefined, { slideshowId: show.id })}
+                    className="w-full flex items-center gap-2 p-2 rounded-lg text-left transition-all hover:bg-[#222]"
+                    style={{ background: "#141414", border: "1px solid #222" }}
+                  >
+                    <span className="text-lg">🎞️</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs truncate" style={{ color: "#ccc" }}>
+                        {show.name}
+                      </p>
+                      <p className="text-[9px]" style={{ color: "#666" }}>
+                        {show.items.length} {show.items.length === 1 ? "Bild" : "Bilder"}
                       </p>
                     </div>
                   </button>

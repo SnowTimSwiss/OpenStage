@@ -35,6 +35,23 @@ export interface PdfGroup {
   pages: MediaItem[];
 }
 
+// ── Slideshow ────────────────────────────────────────────────────────────────
+
+export interface SlideshowItem {
+  id: string;
+  mediaId: string; // references an image MediaItem in the slides library
+  duration: number; // seconds to display this image
+}
+
+export interface Slideshow {
+  id: string;
+  name: string;
+  items: SlideshowItem[];
+  loop: boolean;
+  defaultDuration: number; // default seconds applied to newly added images
+  backgroundPlaylistId?: string | null; // optional background music playlist
+}
+
 export type MusicSource = "local";
 
 export interface MusicItem {
@@ -114,13 +131,22 @@ export type TabId =
   | "countdown"
   | "music"
   | "display"
-  | "show";
+  | "show"
+  | "slideshow";
 
 export type TransitionType = "none" | "fade" | "slide" | "zoom";
 
 // ── Show Mode ────────────────────────────────────────────────────────────────
 
-export type ShowItemType = "image" | "video" | "song" | "countdown" | "pdf" | "music" | "playlist";
+export type ShowItemType =
+  | "image"
+  | "video"
+  | "song"
+  | "countdown"
+  | "pdf"
+  | "music"
+  | "playlist"
+  | "slideshow";
 
 export interface ShowItem {
   id: string;
@@ -130,6 +156,7 @@ export interface ShowItem {
   slideIndex?: number; // for songs/pdf: current page number
   musicTrackId?: string; // for music: specific track to play
   playlistId?: string; // for playlist: which playlist to play
+  slideshowId?: string; // for slideshow: which slideshow to play
   showMusicOverlay?: boolean; // show title/artist on output (default: true)
 }
 

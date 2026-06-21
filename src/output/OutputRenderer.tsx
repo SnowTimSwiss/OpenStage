@@ -1,5 +1,6 @@
 import type { RefObject } from "react";
 import type { OutputPayload } from "../types";
+import SongAllSlidesView from "./SongAllSlidesView";
 
 function formatTime(s: number) {
   const m = Math.floor(s / 60);
@@ -35,7 +36,6 @@ export default function OutputRenderer({
   const rootClassName = embedded ? "w-full h-full" : "w-screen h-screen";
   const transitionStyle = { opacity: isTransitioning ? 0 : 1 };
   const { mode } = state;
-  const songFontSize = compact ? "clamp(0.75rem, 1.6vw, 1.15rem)" : "clamp(2rem, 5vw, 5rem)";
   const countdownLabelSize = compact ? "0.7rem" : "1.5rem";
   const countdownTimeSize = compact ? "clamp(1.5rem, 3.8vw, 3.4rem)" : "clamp(6rem, 18vw, 18rem)";
   const countdownTransition = "opacity 1200ms ease";
@@ -113,32 +113,10 @@ export default function OutputRenderer({
 
   if (mode === "song" && state.song) {
     const isAllSlides = state.song.allSlides === true;
-    const songFontSizeValue = compact 
-      ? (isAllSlides ? "clamp(0.6rem, 1.15vw, 0.85rem)" : "clamp(0.75rem, 1.6vw, 1.15rem)")
-      : (isAllSlides ? "clamp(1rem, 2.35vw, 2rem)" : "clamp(2rem, 5vw, 5rem)");
-    const songTextBlocks = state.song.text
-      .split(/\n{2,}/)
-      .map((block) => block.trim())
-      .filter(Boolean);
-    const songTextColumns = songTextBlocks.reduce<string[][]>(
-      (columns, block) => {
-        const leftLength = columns[0].join("\n").length;
-        const rightLength = columns[1].join("\n").length;
-        columns[leftLength <= rightLength ? 0 : 1].push(block);
-        return columns;
-      },
-      [[], []]
-    );
+    const songFontSizeValue = compact
+      ? "clamp(0.75rem, 1.6vw, 1.15rem)"
+      : "clamp(2rem, 5vw, 5rem)";
 
-    // Bei ganzen Liedern: Text in Spalten aufteilen für bessere Lesbarkeit
-    const gridColumnStyle = isAllSlides && !compact
-      ? {
-          textAlign: "center" as const,
-          maxWidth: "84rem",
-          width: "100%",
-        }
-      : {};
-    
     return (
       <div
         className={`${rootClassName} bg-black flex flex-col items-center justify-center px-20 transition-opacity duration-300 relative`}
@@ -160,33 +138,7 @@ export default function OutputRenderer({
 
         <div className="relative z-10 flex flex-col items-center justify-center w-full h-full pb-24">
           {isAllSlides ? (
-            <div
-              className="grid grid-cols-2 gap-x-16 text-white leading-snug"
-              style={{
-                fontSize: songFontSizeValue,
-                fontFamily: "'Sora', sans-serif",
-                fontWeight: 300,
-                textShadow: "0 2px 20px rgba(0,0,0,0.8)",
-                letterSpacing: "0.01em",
-                ...gridColumnStyle,
-              }}
-            >
-              {songTextColumns.map((column, columnIndex) => (
-                <div key={columnIndex}>
-                  {column.map((block, blockIndex) => (
-                    <p
-                      key={`${columnIndex}-${blockIndex}`}
-                      className="whitespace-pre-line"
-                      style={{
-                        marginBottom: blockIndex === column.length - 1 ? 0 : "0.9em",
-                      }}
-                    >
-                      {block}
-                    </p>
-                  ))}
-                </div>
-              ))}
-            </div>
+            <SongAllSlidesView text={state.song.text} compact={compact} />
           ) : (
             <p
               className="text-white leading-snug whitespace-pre-line"

@@ -5,6 +5,7 @@ import { save as saveFile, open as openFile } from "@tauri-apps/plugin-dialog";
 import { writeFile, readFile } from "@tauri-apps/plugin-fs";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { getSongEffectiveSlideCount, getSongPresentation } from "../../lib/songPresentation";
+import SongAllSlidesView from "../../output/SongAllSlidesView";
 
 type View = "list" | "editor" | "live";
 
@@ -214,26 +215,16 @@ export default function SongsTab() {
 
         {/* Slide grid */}
         {activeSong.combineSlides ? (
-          /* Vorschau des ganzen Liedes - 2 Spalten wie im Output */
-          <div className="flex-1 overflow-y-auto p-4">
-            <div className="rounded-lg p-6" style={{ background: "#141414", border: "1px solid #f9731640" }}>
-              <div className="text-xs font-medium mb-4 text-center" style={{ color: "#f97316" }}>
-                📄 Vorschau - Ganzes Lied
-              </div>
-              <div
-                className="text-white leading-snug whitespace-pre-line"
-                style={{
-                  columnCount: 2,
-                  columnGap: "2rem",
-                  textAlign: "center",
-                  fontSize: "clamp(0.9rem, 2vw, 1.5rem)",
-                  fontFamily: "'Sora', sans-serif",
-                  fontWeight: 300,
-                  letterSpacing: "0.01em",
-                }}
-              >
-                {getSongPresentation(activeSong, 0).text}
-              </div>
+          /* Vorschau des ganzen Liedes - identisches Auto-Fit Layout wie im Output */
+          <div className="flex-1 overflow-hidden p-4 flex flex-col min-h-0">
+            <div className="text-xs font-medium mb-3 text-center" style={{ color: "#f97316" }}>
+              📄 Vorschau - Ganzes Lied
+            </div>
+            <div
+              className="flex-1 min-h-0 rounded-lg overflow-hidden bg-black px-6 py-5"
+              style={{ border: "1px solid #f9731640" }}
+            >
+              <SongAllSlidesView text={getSongPresentation(activeSong, 0).text} compact />
             </div>
           </div>
         ) : (

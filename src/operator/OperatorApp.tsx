@@ -8,6 +8,7 @@ import CountdownTab from "./tabs/CountdownTab";
 import MusicTab from "./tabs/MusicTab";
 import DisplayTab from "./tabs/DisplayTab";
 import ShowTab from "./tabs/ShowTab";
+import SlideshowTab from "./tabs/SlideshowTab";
 import OutputRenderer from "../output/OutputRenderer";
 import MusicOverlay from "./MusicOverlay";
 import { getSongPresentation } from "../lib/songPresentation";
@@ -60,8 +61,9 @@ export default function OperatorApp() {
           {activeTab === "music" && <MusicTab />}
           {activeTab === "display" && <DisplayTab />}
           {activeTab === "show" && <ShowTab />}
+          {activeTab === "slideshow" && <SlideshowTab />}
         </main>
-        {activeTab !== "show" && <PreviewPanel />}
+        {activeTab !== "show" && activeTab !== "slideshow" && <PreviewPanel />}
       </div>
       <MusicOverlay />
     </div>

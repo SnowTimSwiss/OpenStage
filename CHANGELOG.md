@@ -2,6 +2,27 @@
 
 Alle wesentlichen Änderungen an OpenStage werden in dieser Datei dokumentiert.
 
+## [Unreleased]
+
+### Hinzugefügt
+- **Diashow-Tab** – Eigener Bereich zum Erstellen von Bilder-Diashows
+  - Diashows aus Bildern der Medien-Bibliothek zusammenstellen
+  - Anzeigedauer pro Bild einstellbar (Standard-Dauer pro Diashow)
+  - Optionale Hintergrundmusik (Playlist) während der Diashow
+  - Endlos-Schleife (Loop) an-/abschaltbar
+  - Live-Steuerung: Start/Pause/Weiter, Vor/Zurück, Stoppen
+  - Tastatur: ← → blättern, Space pausiert/fortsetzt (wenn live)
+  - Reihenfolge der Bilder per ▲▼ ändern
+  - **Zur Show hinzufügen** – Diashow als Block in die Show-Queue übernehmen
+    (auto-advance, ← → blättert innerhalb der Diashow)
+
+### Geändert
+- **„Ganzes Lied" Layout überarbeitet** – Automatische, platzfüllende Darstellung
+  - Schriftgröße wird per Auto-Fit maximal groß gewählt, ohne überzulaufen
+  - Automatische 1- vs. 2-Spalten-Wahl je nach Textmenge
+  - Strophen werden nicht mehr mitten durchgeschnitten
+  - Vorschau im Lieder-Tab entspricht exakt der Ausgabe
+
 ## [1.3.1] - 2026-03-22
 
 ### Hinzugefügt
