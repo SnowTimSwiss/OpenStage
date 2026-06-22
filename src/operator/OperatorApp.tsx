@@ -16,6 +16,20 @@ import type { OutputPayload } from "../types";
 
 export default function OperatorApp() {
   const activeTab = useStore((s) => s.activeTab);
+  const showQueue = useStore((s) => s.showQueue);
+  const showCurrentIndex = useStore((s) => s.showCurrentIndex);
+
+  // The floating music island is the always-available fallback transport. We hide
+  // it whenever the current view already exposes its own music controls, so there
+  // is never the floating island AND an inline control on screen at the same time:
+  //  - normal tabs render the PreviewPanel (which has a music transport)
+  //  - the show tab renders inline music controls when the current item is music
+  //  - the slideshow tab has no inline transport, so the island stays visible there
+  const currentShowItem =
+    showCurrentIndex >= 0 && showCurrentIndex < showQueue.length ? showQueue[showCurrentIndex] : null;
+  const inlineMusicControlsVisible =
+    (activeTab !== "show" && activeTab !== "slideshow") ||
+    (activeTab === "show" && (currentShowItem?.type === "music" || currentShowItem?.type === "playlist"));
 
   useEffect(() => {
     useStore.getState().fetchMonitors();
@@ -65,7 +79,7 @@ export default function OperatorApp() {
         </main>
         {activeTab !== "show" && activeTab !== "slideshow" && <PreviewPanel />}
       </div>
-      <MusicOverlay />
+      {!inlineMusicControlsVisible && <MusicOverlay />}
     </div>
   );
 }

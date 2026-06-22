@@ -30,6 +30,11 @@ const SLIDESHOWS_KEY = "openstage-slideshows-v1";
 let countdownInterval: ReturnType<typeof setInterval> | null = null;
 let musicAudio: HTMLAudioElement | null = null;
 let musicAudioSrc: string | null = null;
+// While a fade is in progress, the fade controller in setMusicPlaying owns the
+// audio element exclusively (volume + play/pause). syncFromState must not touch
+// it during that window, otherwise the two control paths fight and the playback
+// stutters / oscillates between play and pause.
+let musicFadeInterval: ReturnType<typeof setInterval> | null = null;
 let backgroundMusicAudio: HTMLAudioElement | null = null;
 let countdownBgPlaylistId: string | null = null;
 let countdownBgQueue: MusicItem[] = [];
@@ -85,6 +90,13 @@ function ensureMusicAudio(): HTMLAudioElement | null {
   musicAudio = new Audio();
   musicAudio.preload = "metadata";
   return musicAudio;
+}
+
+function clearMusicFade() {
+  if (musicFadeInterval) {
+    clearInterval(musicFadeInterval);
+    musicFadeInterval = null;
+  }
 }
 
 function ensureBackgroundMusicAudio(): HTMLAudioElement | null {
@@ -1431,51 +1443,48 @@ export const useStore = create<Store>((set, get) => ({
     const a = ensureMusicAudio();
     if (!a) return;
 
+    // A new fade always supersedes any fade still in progress. While a fade
+    // runs, syncFromState leaves the element alone (see initMusicEngine), so
+    // this is the single owner of volume + play/pause during the transition.
+    clearMusicFade();
+
+    const fadeSteps = 20;
+    const stepTime = Math.max(1, (fadeDuration * 1000) / fadeSteps);
+
     if (p) {
       const current = get().music[get().musicIndex];
       if (!current?.src) {
         set({ error: "Dieser Track kann nicht abgespielt werden (keine Audio-Quelle).", musicPlaying: false });
         return;
       }
-      // Fade in
+      // Fade in towards the configured target volume.
+      const target = get().musicVolume;
       a.volume = 0;
       a.play().catch(() => {});
       set({ musicPlaying: true });
 
-      // Fade in over fadeDuration seconds
-      const fadeSteps = 20;
-      const stepTime = (fadeDuration * 1000) / fadeSteps;
       let step = 0;
-      const fadeInterval = setInterval(() => {
+      musicFadeInterval = setInterval(() => {
         step++;
-        const newVolume = Math.min(1, step / fadeSteps);
-        if (a && !a.paused) {
-          a.volume = newVolume;
-        }
+        a.volume = Math.min(target, (step / fadeSteps) * target);
         if (step >= fadeSteps) {
-          clearInterval(fadeInterval);
+          a.volume = target;
+          clearMusicFade();
         }
       }, stepTime);
     } else {
-      // Fade out
+      // Fade out, then pause once silent (state flips immediately so the UI
+      // reflects the user's intent right away).
       set({ musicPlaying: false });
       const startVolume = a.volume;
-      const fadeSteps = 20;
-      const stepTime = (fadeDuration * 1000) / fadeSteps;
       let step = 0;
-      const fadeInterval = setInterval(() => {
+      musicFadeInterval = setInterval(() => {
         step++;
-        const newVolume = Math.max(0, startVolume * (1 - step / fadeSteps));
-        if (a) {
-          a.volume = newVolume;
-        }
+        a.volume = Math.max(0, startVolume * (1 - step / fadeSteps));
         if (step >= fadeSteps) {
-          clearInterval(fadeInterval);
-          if (a) a.pause();
-          // Reset volume for next track
-          setTimeout(() => {
-            if (a) a.volume = get().musicVolume;
-          }, 100);
+          a.pause();
+          a.volume = get().musicVolume; // restore for the next track
+          clearMusicFade();
         }
       }, stepTime);
     }
@@ -2481,8 +2490,12 @@ function initMusicEngine() {
         // ignore
       }
       useStore.setState({ musicCurrentTime: 0, musicDuration: 0 });
-      if (s.musicPlaying && a.paused) a.play().catch(() => {});
     }
+
+    // During a fade, setMusicPlaying owns volume + play/pause exclusively.
+    // Touching the element here would override the fade and make playback
+    // stutter, so we only kept the src in sync above and bail out.
+    if (musicFadeInterval) return;
 
     if (Number.isFinite(s.musicVolume) && a.volume !== s.musicVolume) {
       a.volume = s.musicVolume;

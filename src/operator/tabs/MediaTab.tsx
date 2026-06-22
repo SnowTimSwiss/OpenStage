@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../../store/useStore";
 import { openOutputWindow, sendVideoControl } from "../../lib/events";
+import ContextMenu, { type ContextMenuItem } from "../ContextMenu";
 
 type FilterType = "all" | "image" | "video" | "pdf";
 
@@ -69,6 +70,14 @@ export default function MediaTab() {
   // Image error tracking
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
   const [retryImages, setRetryImages] = useState<Record<string, boolean>>({});
+
+  // Right-click context menu
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+
+  function openContextMenu(e: React.MouseEvent, items: ContextMenuItem[]) {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, items });
+  }
 
   const presentationGroup = useMemo(() => {
     if (!pdfPresentation) return null;
@@ -261,6 +270,23 @@ export default function MediaTab() {
                     className="flex items-center justify-between px-4 py-3 cursor-pointer"
                     style={{ background: isExpanded ? "#7c3aed20" : "transparent" }}
                     onClick={() => toggleExpandGroup(group.id)}
+                    onContextMenu={(e) =>
+                      openContextMenu(e, [
+                        { label: "Präsentation starten", icon: "📺", onClick: () => startPresentation(group.id) },
+                        {
+                          label: isExpanded ? "Einklappen" : "Ausklappen",
+                          icon: isExpanded ? "▲" : "▼",
+                          onClick: () => toggleExpandGroup(group.id),
+                        },
+                        {
+                          label: "Entfernen",
+                          icon: "🗑️",
+                          onClick: () => removeGroup(group.id),
+                          danger: true,
+                          separatorBefore: true,
+                        },
+                      ])
+                    }
                   >
                     <div className="flex items-center gap-3">
                       <div
@@ -395,6 +421,20 @@ export default function MediaTab() {
                       background: isActive ? "#f9731610" : "#141414",
                       border: isActive ? "1px solid #f9731640" : "1px solid #1e1e1e",
                     }}
+                    onContextMenu={(e) =>
+                      openContextMenu(e, [
+                        { label: "Abspielen", icon: "📺", onClick: () => goLiveVideo(video.id), disabled: isActive },
+                        { label: "Play", icon: "▶", onClick: () => sendVideoControl("play"), disabled: !isActive },
+                        { label: "Pause", icon: "⏸", onClick: () => sendVideoControl("pause"), disabled: !isActive },
+                        {
+                          label: "Entfernen",
+                          icon: "🗑️",
+                          onClick: () => removeVideo(video.id),
+                          danger: true,
+                          separatorBefore: true,
+                        },
+                      ])
+                    }
                   >
                     <div
                       className="w-16 h-12 rounded flex items-center justify-center shrink-0"
@@ -479,6 +519,18 @@ export default function MediaTab() {
                       opacity: dragIndex === i ? 0.5 : 1,
                     }}
                     onClick={() => goLiveSlide(slide.id)}
+                    onContextMenu={(e) =>
+                      openContextMenu(e, [
+                        { label: "Live zeigen", icon: "📺", onClick: () => goLiveSlide(slide.id), disabled: active },
+                        {
+                          label: "Entfernen",
+                          icon: "🗑️",
+                          onClick: () => removeSlide(slide.id),
+                          danger: true,
+                          separatorBefore: true,
+                        },
+                      ])
+                    }
                   >
                     <div className="aspect-video bg-black relative">
                       <img
@@ -709,6 +761,15 @@ export default function MediaTab() {
             </div>
           </div>
         </div>
+      )}
+
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenu.items}
+          onClose={() => setContextMenu(null)}
+        />
       )}
     </div>
   );

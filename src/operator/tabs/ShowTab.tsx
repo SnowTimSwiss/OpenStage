@@ -3,6 +3,7 @@ import { getSongEffectiveSlideCount, getSongPresentation } from "../../lib/songP
 import { useStore } from "../../store/useStore";
 import { sendToOutput } from "../../lib/events";
 import OutputRenderer from "../../output/OutputRenderer";
+import ContextMenu, { type ContextMenuItem } from "../ContextMenu";
 import type { OutputPayload, ShowItem, MusicItem } from "../../types";
 
 function formatTime(s: number) {
@@ -50,6 +51,24 @@ export default function ShowTab() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const previewVideoRef = useRef<HTMLVideoElement>(null);
+
+  // Pointer-based sortable reordering of the queue (PowerPoint-style: the grabbed
+  // row follows the cursor while the others glide aside to open a gap).
+  const queueListRef = useRef<HTMLDivElement>(null);
+  const dragStateRef = useRef<{
+    fromIndex: number;
+    pointerStartY: number;
+    step: number;
+    metrics: { top: number; height: number }[];
+  } | null>(null);
+  const pendingDragRef = useRef<{ index: number; startY: number } | null>(null);
+  const suppressClickRef = useRef(false);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [pointerY, setPointerY] = useState(0);
+  const [dropIndex, setDropIndex] = useState(-1);
+
+  // Right-click context menu for queue items
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -201,6 +220,140 @@ export default function ShowTab() {
     }
   }
 
+  // Index (in the array after the dragged item is removed) where the row would land.
+  function computeDropIndex(clientY: number): number {
+    const ds = dragStateRef.current;
+    if (!ds) return -1;
+    let count = 0;
+    ds.metrics.forEach((m, i) => {
+      if (i === ds.fromIndex) return;
+      if (m.top + m.height / 2 < clientY) count++;
+    });
+    return Math.min(count, showQueue.length - 1);
+  }
+
+  function startDrag(index: number, startY: number) {
+    const rows = Array.from(queueListRef.current?.querySelectorAll<HTMLElement>("[data-queue-row]") ?? []);
+    const metrics = rows.map((el) => {
+      const r = el.getBoundingClientRect();
+      return { top: r.top, height: r.height };
+    });
+    if (!metrics[index]) return;
+    const next = metrics[index + 1];
+    const step = next ? next.top - metrics[index].top : metrics[index].height + 4;
+    dragStateRef.current = { fromIndex: index, pointerStartY: startY, step, metrics };
+    setDragId(showQueue[index].id);
+    setPointerY(startY);
+    setDropIndex(index);
+  }
+
+  function handleRowPointerDown(e: React.PointerEvent, index: number) {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest("[data-no-drag]")) return;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    pendingDragRef.current = { index, startY: e.clientY };
+  }
+
+  function handleRowPointerMove(e: React.PointerEvent) {
+    if (!dragStateRef.current) {
+      const pending = pendingDragRef.current;
+      if (!pending) return;
+      if (Math.abs(e.clientY - pending.startY) < 5) return;
+      startDrag(pending.index, pending.startY);
+    }
+    setPointerY(e.clientY);
+    setDropIndex(computeDropIndex(e.clientY));
+  }
+
+  function handleRowPointerUp(e: React.PointerEvent) {
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      /* capture may already be released */
+    }
+    const ds = dragStateRef.current;
+    if (ds) {
+      const target = computeDropIndex(e.clientY);
+      if (target >= 0 && target !== ds.fromIndex) moveItemToFinalIndex(ds.fromIndex, target);
+      suppressClickRef.current = true;
+    }
+    pendingDragRef.current = null;
+    dragStateRef.current = null;
+    setDragId(null);
+    setDropIndex(-1);
+  }
+
+  function rowDragStyle(index: number): React.CSSProperties {
+    const ds = dragStateRef.current;
+    if (!ds || !dragId) return {};
+    if (index === ds.fromIndex) {
+      return {
+        transform: `translateY(${pointerY - ds.pointerStartY}px) scale(1.02)`,
+        transition: "none",
+        position: "relative",
+        zIndex: 50,
+        opacity: 0.97,
+        boxShadow: "0 10px 28px rgba(0,0,0,0.55)",
+        cursor: "grabbing",
+      };
+    }
+    let shift = 0;
+    if (dropIndex > ds.fromIndex && index > ds.fromIndex && index <= dropIndex) shift = -ds.step;
+    else if (dropIndex < ds.fromIndex && index >= dropIndex && index < ds.fromIndex) shift = ds.step;
+    return {
+      transform: `translateY(${shift}px)`,
+      transition: "transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1)",
+      position: "relative",
+    };
+  }
+
+  function openItemContextMenu(e: React.MouseEvent, index: number) {
+    e.preventDefault();
+    const item = showQueue[index];
+    if (!item) return;
+    const items: ContextMenuItem[] = [
+      {
+        label: "Live zeigen",
+        icon: "📺",
+        onClick: () => handleItemClick(index),
+        disabled: index === showCurrentIndex,
+      },
+      {
+        label: "An den Anfang",
+        icon: "⤒",
+        onClick: () => moveItemToFinalIndex(index, 0),
+        disabled: index === 0,
+        separatorBefore: true,
+      },
+      {
+        label: "Nach oben",
+        icon: "↑",
+        onClick: () => moveItemToFinalIndex(index, index - 1),
+        disabled: index === 0,
+      },
+      {
+        label: "Nach unten",
+        icon: "↓",
+        onClick: () => moveItemToFinalIndex(index, index + 1),
+        disabled: index === showQueue.length - 1,
+      },
+      {
+        label: "Ans Ende",
+        icon: "⤓",
+        onClick: () => moveItemToFinalIndex(index, showQueue.length - 1),
+        disabled: index === showQueue.length - 1,
+      },
+      {
+        label: "Aus Show entfernen",
+        icon: "🗑️",
+        onClick: () => removeFromShowQueue(item.id),
+        danger: true,
+        separatorBefore: true,
+      },
+    ];
+    setContextMenu({ x: e.clientX, y: e.clientY, items });
+  }
+
   function getTotalSlides(item: ShowItem) {
     if (item.type === "song" && item.refId) {
       const song = songs.find((s) => s.id === item.refId);
@@ -250,7 +403,11 @@ export default function ShowTab() {
             </span>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1">
+          <div
+            ref={queueListRef}
+            className="flex-1 overflow-y-auto p-2 flex flex-col gap-1"
+            style={dragId ? { userSelect: "none" } : undefined}
+          >
             {showQueue.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-center px-4">
                 <span className="text-3xl mb-2">📋</span>
@@ -269,18 +426,30 @@ export default function ShowTab() {
                   const currentSlide = (item.slideIndex ?? 0) + 1;
 
                   return (
-                    <div key={item.id}>
+                    <div key={item.id} data-queue-row>
                       <div
-                        onClick={() => handleItemClick(index)}
+                        onPointerDown={(e) => handleRowPointerDown(e, index)}
+                        onPointerMove={handleRowPointerMove}
+                        onPointerUp={handleRowPointerUp}
+                        onClick={() => {
+                          if (suppressClickRef.current) {
+                            suppressClickRef.current = false;
+                            return;
+                          }
+                          handleItemClick(index);
+                        }}
+                        onContextMenu={(e) => openItemContextMenu(e, index)}
                         className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all border ${
                           isActive
                             ? "bg-[#f9731620] border-[#f9731640]"
                             : "bg-[#141414] border-[#1e1e1e] hover:border-[#333]"
                         }`}
+                        style={rowDragStyle(index)}
                       >
                         <span
                           className="text-[10px] cursor-grab active:cursor-grabbing select-none"
                           style={{ color: "#444" }}
+                          title="Ziehen zum Umsortieren"
                         >
                           ⋮⋮
                         </span>
@@ -328,38 +497,14 @@ export default function ShowTab() {
                         )}
 
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            moveItemToFinalIndex(index, index - 1);
-                          }}
-                          disabled={index === 0}
-                          className="text-[10px] px-1.5 py-0.5 rounded disabled:opacity-30"
-                          style={{ color: "#777", border: "1px solid #2a2a2a", background: "#181818" }}
-                          title="Nach oben"
-                        >
-                          ↑
-                        </button>
-
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            moveItemToFinalIndex(index, index + 1);
-                          }}
-                          disabled={index === showQueue.length - 1}
-                          className="text-[10px] px-1.5 py-0.5 rounded disabled:opacity-30"
-                          style={{ color: "#777", border: "1px solid #2a2a2a", background: "#181818" }}
-                          title="Nach unten"
-                        >
-                          ↓
-                        </button>
-
-                        <button
+                          data-no-drag
                           onClick={(e) => {
                             e.stopPropagation();
                             removeFromShowQueue(item.id);
                           }}
                           className="text-[10px] p-1 rounded hover:bg-[#222]"
                           style={{ color: "#555" }}
+                          title="Aus Show entfernen"
                         >
                           ✕
                         </button>
@@ -610,6 +755,15 @@ export default function ShowTab() {
             </div>
           </div>
         </div>
+      )}
+
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenu.items}
+          onClose={() => setContextMenu(null)}
+        />
       )}
     </div>
   );
