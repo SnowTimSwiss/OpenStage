@@ -254,4 +254,4 @@ Siehe [LICENSE](LICENSE) für Details.
 
 ---
 
-**OpenStage** – Built with ❤️ for live event creators everywhere.
+**OpenStage** – Built with ❤️
