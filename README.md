@@ -40,25 +40,6 @@ Entwickelt für alle, die die Technik hinter der Bühne steuern – nicht nur f�
 ### Downloads
 Lade die neueste Version von der [Releases-Seite](https://github.com/snowtimswiss/openstage/releases) herunter.
 
-### Windows
-| Datei | Beschreibung |
-|-------|-------------|
-| `openstage-v{version}-windows-x64-setup.exe` | **Empfohlen** – NSIS Installer |
-| `openstage-v{version}-windows-x64-installer.msi` | Windows Installer (MSI) |
-| `openstage-v{version}-windows-x64-portable.exe` | Portable – keine Installation nötig |
-
-### macOS
-| Datei | Beschreibung |
-|-------|-------------|
-| `openstage-v{version}-macos-arm64.dmg` | **Apple Silicon** (M1/M2/M3) |
-| `openstage-v{version}-macos-intel.dmg` | **Intel** (ältere Macs bis 2019) |
-
-### Linux
-| Datei | Beschreibung |
-|-------|-------------|
-| `openstage-v{version}-linux-amd64.deb` | Debian/Ubuntu (.deb) |
-| `openstage-v{version}-linux-x86_64.AppImage` | AppImage (die meisten Distros) |
-
 ---
 
 ## 🚀 Erste Schritte
