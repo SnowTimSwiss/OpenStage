@@ -2,6 +2,22 @@
 
 Alle wesentlichen Änderungen an OpenStage werden in dieser Datei dokumentiert.
 
+## [2.0.0] - 2026-08-23
+
+### Hinzugefügt
+- **Nativer PowerPoint-Import** – .pptx-Dateien direkt importieren, kein manueller
+  PDF-Export mehr nötig
+  - Tab **Medien** → **+ PowerPoint** → .pptx auswählen → fertig
+  - Rendering über ein in die App integrierte, gebündelte LibreOffice-Komponente
+    (nichts zu installieren, läuft komplett offline)
+  - Folien inkl. Text, Formen und Bildern werden pixelgenau gerendert
+  - Referentennotizen werden mit übernommen und erscheinen im Präsentationsmodus
+  - Fällt bei Problemen automatisch auf den bisherigen PDF-Import-Hinweis zurück
+
+### Geändert
+- **Installer-Größe** – Durch die gebündelte LibreOffice-Komponente wachsen alle
+  Installer spürbar (mehrere hundert MB)
+
 ## [1.5.0] - 2026-08-23
 
 ### Hinzugefügt

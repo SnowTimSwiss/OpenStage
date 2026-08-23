@@ -57,7 +57,6 @@ fn collect_slide_numbers_from_archive<R: Read + Seek>(archive: &mut ZipArchive<R
     numbers
 }
 
-#[cfg(any())]
 fn count_pptx_slides(path: &str) -> usize {
     let file = match std::fs::File::open(path) {
         Ok(f) => f,
@@ -89,7 +88,6 @@ fn count_pptx_slides(path: &str) -> usize {
         .unwrap_or(0)
 }
 
-#[cfg(any())]
 fn path_to_file_url(path: &std::path::Path) -> String {
     let mut raw = path.to_string_lossy().replace('\\', "/");
     if !raw.starts_with('/') {
@@ -99,10 +97,29 @@ fn path_to_file_url(path: &std::path::Path) -> String {
     format!("file://{}", encoded)
 }
 
-/// Get LibreOffice installation status
-#[cfg(any())]
-fn find_libreoffice() -> Option<PathBuf> {
-    // Check common installation paths
+/// Locate the soffice binary: prefer a bundled copy shipped as a Tauri
+/// resource, then fall back to a system installation (useful in dev, and as
+/// resilience if the bundled copy is missing/corrupted).
+fn find_libreoffice(app: &tauri::AppHandle) -> Option<PathBuf> {
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let bundled = [
+            // Linux (staged from .deb, LibreOffice's own layout) and Windows
+            // (staged from an admin MSI image).
+            resource_dir.join("libreoffice/program/soffice"),
+            resource_dir.join("libreoffice/program/soffice.exe"),
+            resource_dir.join("libreoffice/program/soffice.bin"),
+            // macOS: staged from LibreOffice.app/Contents, so the binary
+            // lives under MacOS/ rather than program/.
+            resource_dir.join("libreoffice/MacOS/soffice"),
+        ];
+        for path in &bundled {
+            if path.exists() {
+                return Some(path.clone());
+            }
+        }
+    }
+
+    // Check common system installation paths
     let paths = [
         // Windows
         PathBuf::from("C:\\Program Files\\LibreOffice\\program\\soffice.exe"),
@@ -137,18 +154,17 @@ fn find_libreoffice() -> Option<PathBuf> {
     None
 }
 
-#[allow(dead_code)]
-#[cfg(any())]
+#[tauri::command]
 fn import_pptx_with_libreoffice(
-    _app: tauri::AppHandle,
+    app: tauri::AppHandle,
     path: String,
 ) -> Result<PptxFile, String> {
     use std::process::Command;
     use zip::read::ZipArchive;
 
-    // Check if LibreOffice is installed
-    let libreoffice_path = find_libreoffice()
-        .ok_or_else(|| "LibreOffice ist nicht installiert. Bitte installieren Sie LibreOffice, um PowerPoint-Dateien zu importieren.".to_string())?;
+    // Check if LibreOffice is available (bundled or system-installed)
+    let libreoffice_path = find_libreoffice(&app)
+        .ok_or_else(|| "Die integrierte LibreOffice-Komponente konnte nicht gefunden werden. Die Installation könnte beschädigt sein.".to_string())?;
 
     // Create output directory for slide images
     let out_dir = {
@@ -234,8 +250,12 @@ fn import_pptx_with_libreoffice(
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
 
-        cmd.output()
-            .map_err(|e| format!("Failed to run LibreOffice: {}", e))
+        cmd.output().map_err(|e| {
+            format!(
+                "LibreOffice konnte nicht gestartet werden (möglicherweise fehlende Systembibliotheken): {}",
+                e
+            )
+        })
     };
 
     let mut slide_images: Vec<PathBuf> = Vec::new();
@@ -687,6 +707,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_monitors,
             import_pptx,
+            import_pptx_with_libreoffice,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

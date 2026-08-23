@@ -13,6 +13,11 @@ dist/
 # ── Tauri ────────────────────────────────────────────────────────────────────
 src-tauri/**/*.log
 
+# Staged by CI (release.yml) before `tauri build`; not checked in (hundreds of MB).
+# See src-tauri/resources/README.md.
+src-tauri/resources/libreoffice/*
+!src-tauri/resources/libreoffice/.gitkeep
+
 # ── Environment ──────────────────────────────────────────────────────────────
 .env
 .env.local

@@ -184,6 +184,15 @@ function reviveMediaItem(item: MediaItem): MediaItem {
   return item;
 }
 
+function bytesToDataUrl(bytes: Uint8Array, mimeType: string): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return `data:${mimeType};base64,${btoa(binary)}`;
+}
+
 function revivePdfGroup(group: PdfGroup): PdfGroup {
   return {
     ...group,
@@ -556,6 +565,7 @@ interface Store {
   pdfGroups: PdfGroup[];
   expandedGroupId: string | null;
   loadPdf: () => Promise<void>;
+  loadPptx: () => Promise<void>;
   toggleExpandGroup: (groupId: string) => void;
   removeGroup: (groupId: string) => void;
   goLivePageFromGroup: (groupId: string, pageIndex: number) => void;
@@ -949,6 +959,70 @@ export const useStore = create<Store>((set, get) => ({
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Fehler beim Laden der PDF-Datei");
+    } finally {
+      setLoading(false);
+    }
+  },
+
+  loadPptx: async () => {
+    const { setLoading, setError, clearError } = get();
+
+    try {
+      setLoading(true);
+      clearError();
+      const { readFile } = await import("@tauri-apps/plugin-fs");
+
+      const files = await openDialog({
+        multiple: true,
+        filters: [{ name: "PowerPoint", extensions: ["pptx"] }],
+      });
+      if (!files) return;
+      const arr = Array.isArray(files) ? files : [files];
+
+      for (const file of arr) {
+        const filePath = file as string;
+
+        const pptxFile = await invoke<{
+          name: string;
+          slides: Array<{
+            slide_number: number;
+            name: string;
+            image_path: string;
+            notes: string | null;
+          }>;
+        }>("import_pptx_with_libreoffice", { path: filePath });
+
+        if (pptxFile.slides.length === 0) {
+          throw new Error("Keine Folien konnten aus der PowerPoint-Datei extrahiert werden.");
+        }
+
+        const groupId = crypto.randomUUID();
+        const pages: MediaItem[] = [];
+
+        for (const slide of pptxFile.slides) {
+          const raw = await readFile(slide.image_path);
+          const bytes = raw instanceof Uint8Array ? raw : new Uint8Array(raw as ArrayLike<number>);
+          const ext = slide.image_path.split(".").pop()?.toLowerCase() ?? "png";
+          const mimeType = ext === "jpg" || ext === "jpeg" ? "image/jpeg" : "image/png";
+
+          pages.push({
+            id: crypto.randomUUID(),
+            name: slide.name,
+            path: slide.image_path,
+            src: bytesToDataUrl(bytes, mimeType),
+            type: "pdf",
+            groupId,
+            pageNumber: slide.slide_number,
+            notes: slide.notes ?? undefined,
+          });
+        }
+
+        set((s) => ({
+          pdfGroups: [...s.pdfGroups, { id: groupId, name: pptxFile.name, pages }],
+        }));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : formatUnknownError(err));
     } finally {
       setLoading(false);
     }
@@ -2662,7 +2736,25 @@ function resolveShowItemTrackIndex(item: ShowItem | undefined): number {
  */
 function applyShowMusicForItem(item: ShowItem | undefined) {
   if (showOwnsMusic) {
-    useStore.getState().stopMusic();
+    // Hard-stop the outgoing track instead of going through stopMusic()'s
+    // fade-out: that fade runs on an interval, and immediately starting the
+    // next track below would race it (clearMusicFade in playMusicFromStart
+    // kills the interval before it ever reaches a.pause()/currentTime=0,
+    // occasionally leaving the old track's audio/position bleeding into the
+    // next one). A show item change must switch tracks cleanly every time.
+    clearMusicFade();
+    musicEndAfterFadeOut = false;
+    const a = ensureMusicAudio();
+    if (a) {
+      a.pause();
+      try {
+        a.currentTime = 0;
+      } catch {
+        // ignore
+      }
+      a.volume = useStore.getState().musicVolume;
+    }
+    useStore.setState({ musicPlaying: false, musicCurrentTime: 0 });
     showOwnsMusic = false;
   }
 

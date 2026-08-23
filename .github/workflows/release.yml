@@ -10,6 +10,10 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   APP_NAME: openstage
+  # Headless LibreOffice bundled into every installer so PPTX import works
+  # with nothing for the user to install. Bump deliberately; each bump
+  # invalidates the LO download caches below.
+  LIBREOFFICE_VERSION: '26.2.5'
 
 jobs:
   build-windows:
@@ -33,6 +37,54 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Cache staged LibreOffice
+        id: lo-cache
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/resources/libreoffice
+          key: libreoffice-windows-x64-${{ env.LIBREOFFICE_VERSION }}
+
+      - name: Check cached LibreOffice is complete
+        id: lo-verify
+        shell: pwsh
+        run: |
+          $ok = Test-Path "src-tauri\resources\libreoffice\program\soffice.exe"
+          "complete=$($ok.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+
+      - name: Download and stage LibreOffice (Windows)
+        if: steps.lo-verify.outputs.complete != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = $env:LIBREOFFICE_VERSION
+          $url = "https://download.documentfoundation.org/libreoffice/stable/$version/win/x86_64/LibreOffice_${version}_Win_x86-64.msi"
+          $msiPath = "$env:RUNNER_TEMP\libreoffice.msi"
+          Write-Host "Downloading $url"
+          Invoke-WebRequest -Uri $url -OutFile $msiPath
+
+          # Administrative install extracts the MSI's file layout without
+          # registering the app or needing elevation for a real install.
+          $extractDir = "$env:RUNNER_TEMP\lo-extract"
+          msiexec.exe /a "$msiPath" /qn TARGETDIR="$extractDir" | Out-Null
+
+          $stageDir = "src-tauri\resources\libreoffice"
+          New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
+
+          # The admin image nests the real tree under
+          # "...\LibreOffice\<version-ish>\program" etc. Find the "program"
+          # directory produced by the extraction and stage its parent.
+          $programDir = Get-ChildItem -Path $extractDir -Recurse -Directory -Filter "program" | Select-Object -First 1
+          if (-not $programDir) {
+            throw "Could not locate LibreOffice 'program' directory in extracted MSI"
+          }
+          $sourceRoot = $programDir.Parent.FullName
+          Copy-Item -Path "$sourceRoot\*" -Destination $stageDir -Recurse -Force
+
+          if (-not (Test-Path "$stageDir\program\soffice.exe")) {
+            throw "Staged LibreOffice is missing program\soffice.exe"
+          }
+          Write-Host "Staged LibreOffice at $stageDir"
 
       - name: Build Tauri App
         run: npm run tauri build
@@ -93,6 +145,55 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Cache staged LibreOffice
+        id: lo-cache
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/resources/libreoffice
+          key: libreoffice-macos-x86_64-${{ env.LIBREOFFICE_VERSION }}
+
+      - name: Check cached LibreOffice is complete
+        id: lo-verify
+        run: |
+          if [ -x "src-tauri/resources/libreoffice/MacOS/soffice" ]; then
+            echo "complete=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "complete=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download and stage LibreOffice (macOS Intel)
+        if: steps.lo-verify.outputs.complete != 'true'
+        run: |
+          set -euo pipefail
+          version="$LIBREOFFICE_VERSION"
+          url="https://download.documentfoundation.org/libreoffice/stable/${version}/mac/x86_64/LibreOffice_${version}_MacOS_x86-64.dmg"
+          dmg_path="$RUNNER_TEMP/libreoffice.dmg"
+          echo "Downloading $url"
+          curl -fsSL "$url" -o "$dmg_path"
+
+          mount_point="$RUNNER_TEMP/lo-mount"
+          mkdir -p "$mount_point"
+          hdiutil attach "$dmg_path" -mountpoint "$mount_point" -nobrowse -quiet
+
+          app_path=$(find "$mount_point" -maxdepth 1 -iname "*.app" | head -n1)
+          if [ -z "$app_path" ]; then
+            hdiutil detach "$mount_point" -quiet || true
+            echo "Could not locate LibreOffice.app inside the mounted DMG" >&2
+            exit 1
+          fi
+
+          stage_dir="src-tauri/resources/libreoffice"
+          mkdir -p "$stage_dir"
+          cp -R "$app_path/Contents/"* "$stage_dir/"
+
+          hdiutil detach "$mount_point" -quiet
+
+          if [ ! -x "$stage_dir/MacOS/soffice" ]; then
+            echo "Staged LibreOffice is missing MacOS/soffice" >&2
+            exit 1
+          fi
+          echo "Staged LibreOffice at $stage_dir"
+
       - name: Build Tauri App (Intel)
         run: npm run tauri build -- --target x86_64-apple-darwin
         env:
@@ -141,6 +242,55 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Cache staged LibreOffice
+        id: lo-cache
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/resources/libreoffice
+          key: libreoffice-macos-aarch64-${{ env.LIBREOFFICE_VERSION }}
+
+      - name: Check cached LibreOffice is complete
+        id: lo-verify
+        run: |
+          if [ -x "src-tauri/resources/libreoffice/MacOS/soffice" ]; then
+            echo "complete=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "complete=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download and stage LibreOffice (macOS ARM64)
+        if: steps.lo-verify.outputs.complete != 'true'
+        run: |
+          set -euo pipefail
+          version="$LIBREOFFICE_VERSION"
+          url="https://download.documentfoundation.org/libreoffice/stable/${version}/mac/aarch64/LibreOffice_${version}_MacOS_aarch64.dmg"
+          dmg_path="$RUNNER_TEMP/libreoffice.dmg"
+          echo "Downloading $url"
+          curl -fsSL "$url" -o "$dmg_path"
+
+          mount_point="$RUNNER_TEMP/lo-mount"
+          mkdir -p "$mount_point"
+          hdiutil attach "$dmg_path" -mountpoint "$mount_point" -nobrowse -quiet
+
+          app_path=$(find "$mount_point" -maxdepth 1 -iname "*.app" | head -n1)
+          if [ -z "$app_path" ]; then
+            hdiutil detach "$mount_point" -quiet || true
+            echo "Could not locate LibreOffice.app inside the mounted DMG" >&2
+            exit 1
+          fi
+
+          stage_dir="src-tauri/resources/libreoffice"
+          mkdir -p "$stage_dir"
+          cp -R "$app_path/Contents/"* "$stage_dir/"
+
+          hdiutil detach "$mount_point" -quiet
+
+          if [ ! -x "$stage_dir/MacOS/soffice" ]; then
+            echo "Staged LibreOffice is missing MacOS/soffice" >&2
+            exit 1
+          fi
+          echo "Staged LibreOffice at $stage_dir"
 
       - name: Build Tauri App (Apple Silicon)
         run: npm run tauri build -- --target aarch64-apple-darwin
@@ -204,6 +354,73 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Cache staged LibreOffice
+        id: lo-cache
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/resources/libreoffice
+          key: libreoffice-linux-x86_64-${{ env.LIBREOFFICE_VERSION }}
+
+      - name: Check cached LibreOffice is complete
+        id: lo-verify
+        run: |
+          if [ -e "src-tauri/resources/libreoffice/program/soffice" ]; then
+            echo "complete=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "complete=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download and stage LibreOffice (Linux)
+        if: steps.lo-verify.outputs.complete != 'true'
+        run: |
+          set -euo pipefail
+          version="$LIBREOFFICE_VERSION"
+          url="https://download.documentfoundation.org/libreoffice/stable/${version}/deb/x86_64/LibreOffice_${version}_Linux_x86-64_deb.tar.gz"
+          archive_path="$RUNNER_TEMP/libreoffice.tar.gz"
+          echo "Downloading $url"
+          curl -fsSL "$url" -o "$archive_path"
+
+          extract_dir="$RUNNER_TEMP/lo-extract"
+          mkdir -p "$extract_dir"
+          tar -xzf "$archive_path" -C "$extract_dir"
+
+          # The archive contains one top-level dir (LibreOffice_*_Linux_x86-64_deb)
+          # with a DEBS/ subfolder of individual .deb packages. Extract each
+          # into the staging dir without installing them system-wide.
+          debs_dir=$(find "$extract_dir" -maxdepth 2 -type d -name "DEBS" | head -n1)
+          if [ -z "$debs_dir" ]; then
+            echo "Could not locate DEBS directory in extracted archive" >&2
+            exit 1
+          fi
+
+          stage_dir="$GITHUB_WORKSPACE/src-tauri/resources/libreoffice"
+          mkdir -p "$stage_dir"
+          for deb in "$debs_dir"/*.deb; do
+            dpkg-deb -x "$deb" "$stage_dir/root"
+          done
+
+          # dpkg-deb preserves the package's install path
+          # (opt/libreofficeXX/program/soffice); flatten it so
+          # resources/libreoffice/program/soffice is stable regardless of
+          # the version-numbered subdirectory LibreOffice installs into.
+          lo_opt_dir=$(find "$stage_dir/root/opt" -maxdepth 1 -type d -iname "libreoffice*" | head -n1)
+          if [ -z "$lo_opt_dir" ]; then
+            echo "Could not locate opt/libreoffice* after extracting .deb packages" >&2
+            exit 1
+          fi
+          shopt -s dotglob
+          mv "$lo_opt_dir"/* "$stage_dir/"
+          shopt -u dotglob
+          rm -rf "$stage_dir/root"
+
+          chmod +x "$stage_dir/program/soffice.bin" "$stage_dir/program/soffice" 2>/dev/null || true
+
+          if [ ! -e "$stage_dir/program/soffice" ]; then
+            echo "Staged LibreOffice is missing program/soffice" >&2
+            exit 1
+          fi
+          echo "Staged LibreOffice at $stage_dir"
 
       - name: Build Tauri App
         run: npm run tauri build

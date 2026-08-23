@@ -32,6 +32,7 @@ export default function MediaTab() {
   const [pdfPresentation, setPdfPresentation] = useState<{ groupId: string; index: number } | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [showPptxHint, setShowPptxHint] = useState(false);
+  const [pptxImporting, setPptxImporting] = useState(false);
 
   // Slides (images)
   const slides = useStore((s) => s.slides);
@@ -54,6 +55,7 @@ export default function MediaTab() {
   const pdfGroups = useStore((s) => s.pdfGroups);
   const expandedGroupId = useStore((s) => s.expandedGroupId);
   const loadPdf = useStore((s) => s.loadPdf);
+  const loadPptx = useStore((s) => s.loadPptx);
   const toggleExpandGroup = useStore((s) => s.toggleExpandGroup);
   const removeGroup = useStore((s) => s.removeGroup);
   const goLivePageFromGroup = useStore((s) => s.goLivePageFromGroup);
@@ -91,6 +93,19 @@ export default function MediaTab() {
 
   function closePresentation() {
     setPdfPresentation(null);
+  }
+
+  async function handleImportPptx() {
+    setPptxImporting(true);
+    try {
+      await loadPptx();
+      const err = useStore.getState().error;
+      if (err) {
+        setShowPptxHint(true);
+      }
+    } finally {
+      setPptxImporting(false);
+    }
   }
 
   async function ensureOutputVisible() {
@@ -223,12 +238,13 @@ export default function MediaTab() {
 
           {/* Add buttons */}
           <button
-            onClick={() => setShowPptxHint(true)}
-            className="text-xs px-3 py-1.5 rounded font-medium transition-colors"
+            onClick={handleImportPptx}
+            disabled={pptxImporting}
+            className="text-xs px-3 py-1.5 rounded font-medium transition-colors disabled:opacity-60"
             style={{ background: "#7c3aed", color: "white" }}
-            title="PowerPoint als PDF importieren"
+            title="PowerPoint-Datei importieren (.pptx)"
           >
-            + PowerPoint
+            {pptxImporting ? "Importiere…" : "+ PowerPoint"}
           </button>
           <button
             onClick={loadMedia}
@@ -591,7 +607,7 @@ export default function MediaTab() {
           <EmptyState
             icon="📁"
             text="Keine Medien geladen"
-            sub="Füge Bilder, Videos oder PDFs hinzu (PowerPoint als PDF exportieren)"
+            sub="Füge Bilder, Videos, PDFs oder PowerPoint-Dateien hinzu"
             onAction={loadMedia}
             actionLabel="Medien laden"
           />
@@ -833,6 +849,7 @@ function EmptyState({
 }
 
 function PptxHintModal({ onClose, onConfirm }: { onClose: () => void; onConfirm: () => void }) {
+  const error = useStore((s) => s.error);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
       <div className="w-full max-w-md rounded-xl p-6" style={{ background: "#1a1a1a", border: "1px solid #333" }}>
@@ -844,9 +861,9 @@ function PptxHintModal({ onClose, onConfirm }: { onClose: () => void; onConfirm:
             📄
           </div>
           <div>
-            <h3 className="text-base font-semibold text-white">PowerPoint importieren</h3>
+            <h3 className="text-base font-semibold text-white">PowerPoint-Import fehlgeschlagen</h3>
             <p className="text-xs" style={{ color: "#888" }}>
-              Als PDF exportieren für beste Qualität
+              {error ?? "Alternativ als PDF exportieren"}
             </p>
           </div>
         </div>

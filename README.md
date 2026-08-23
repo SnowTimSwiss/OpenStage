@@ -15,7 +15,7 @@ Entwickelt für alle, die die Technik hinter der Bühne steuern – nicht nur f�
 - **Tastatur-Steuerung** – Pfeiltasten, Space für Navigation
 
 ### 📝 Medien & Inhalte
-- **PowerPoint Import** – Exportiere als PDF für perfekte Darstellung (alle Seiten einzeln navigierbar)
+- **PowerPoint Import** – .pptx-Dateien direkt importieren, kein manueller PDF-Export nötig (alle Folien einzeln navigierbar)
 - **Song-Texte** – Folienweise mit Labels (Strophe, Refrain, etc.)
 - **Song Import/Export** – JSON-Format zum Teilen und Archivieren
 - **Bilder** – Alle gängigen Formate (JPG, PNG, GIF, SVG, WebP)
@@ -51,13 +51,15 @@ Lade die neueste Version von der [Releases-Seite](https://github.com/snowtimswis
 4. Das Output-Fenster öffnet sich auf dem gewählten Monitor
 
 ### 2. Medien importieren
-#### PowerPoint als PDF importieren
-1. PowerPoint öffnen
-2. `Datei → Exportieren → PDF/XPS erstellen`
-3. PDF speichern
-4. In OpenStage: Tab **Medien** → **+ PowerPoint** klicken
-5. Anleitung befolgen → PDF auswählen
-6. Alle Seiten werden einzeln angezeigt
+#### PowerPoint importieren
+1. In OpenStage: Tab **Medien** → **+ PowerPoint** klicken
+2. .pptx-Datei auswählen
+3. Alle Folien werden automatisch gerendert und einzeln angezeigt
+
+Kein manueller PDF-Export nötig – das Rendering läuft über eine in OpenStage
+integrierte LibreOffice-Komponente, komplett offline. Schlägt der Import
+ausnahmsweise fehl, bietet OpenStage automatisch den klassischen Weg über
+PDF-Export als Alternative an.
 
 #### Bilder & Videos
 - Tab **Medien** → **+ Medien** → Dateien auswählen
@@ -110,15 +112,19 @@ Lade die neueste Version von der [Releases-Seite](https://github.com/snowtimswis
 ## 📖 Verwendung
 
 ### PowerPoint-Präsentationen
-OpenStage importiert PowerPoint-Dateien als PDF für **100% Layout-Treue**:
+OpenStage importiert .pptx-Dateien direkt für **layoutgetreue Darstellung**:
 - Schriftarten werden korrekt dargestellt
 - Positionierung bleibt exakt erhalten
 - Alle Effekte und Transparenzen funktionieren
+- Referentennotizen werden mit übernommen
 
 **Workflow:**
-1. PowerPoint → `Datei → Exportieren → PDF erstellen`
-2. PDF in OpenStage importieren
-3. Im **Medien**-Tab oder **Show**-Modus verwenden
+1. Tab **Medien** → **+ PowerPoint** → .pptx-Datei auswählen
+2. Im **Medien**-Tab oder **Show**-Modus verwenden
+
+Das Rendering übernimmt eine in OpenStage gebündelte LibreOffice-Komponente –
+kein PowerPoint, kein separates LibreOffice und keine Internetverbindung
+nötig.
 
 ### Songs verwalten
 **Song-Format (JSON):**
@@ -204,6 +210,7 @@ npm run format:check
 | **State** | Zustand |
 | **Backend** | Tauri v2 (Rust) |
 | **PDF-Rendering** | PDF.js (Mozilla) |
+| **PowerPoint-Rendering** | LibreOffice (headless, gebündelt) |
 | **Build** | Vite |
 
 ---
@@ -240,6 +247,7 @@ Siehe [LICENSE](LICENSE) für Details.
 
 - [Tauri](https://tauri.app) – Für das fantastische Rust-basierte Framework
 - [PDF.js](https://mozilla.github.io/pdf.js/) – Mozilla's PDF-Renderer
+- [LibreOffice](https://www.libreoffice.org/) – PowerPoint-Rendering (siehe [`src-tauri/LICENSES/libreoffice/`](src-tauri/LICENSES/libreoffice/NOTICE.md) für Lizenzhinweise)
 - [React](https://react.dev) – Die UI-Bibliothek
 - [Zustand](https://zustand-demo.pmnd.rs/) – Minimalistischer State-Manager
 - [TailwindCSS](https://tailwindcss.com/) – Utility-First CSS
