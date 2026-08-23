@@ -2,7 +2,7 @@
 
 Alle wesentlichen Änderungen an OpenStage werden in dieser Datei dokumentiert.
 
-## [Unreleased]
+## [1.5.0] - 2026-08-23
 
 ### Hinzugefügt
 - **Diashow-Tab** – Eigener Bereich zum Erstellen von Bilder-Diashows
@@ -15,13 +15,26 @@ Alle wesentlichen Änderungen an OpenStage werden in dieser Datei dokumentiert.
   - Reihenfolge der Bilder per ▲▼ ändern
   - **Zur Show hinzufügen** – Diashow als Block in die Show-Queue übernehmen
     (auto-advance, ← → blättert innerhalb der Diashow)
+- **Schwarz/Hintergrundbild-Folie** – Fertige Folie direkt im Show-Tab hinzufügbar
+  (Reiter „Folien" im „Zur Show hinzufügen"-Dialog)
 
 ### Geändert
+- **Blackout** – Bleibt jetzt konsequent aktiv, bis er manuell ausgeschaltet wird
+  (vorher konnte Countdown/Diashow/Show-Navigation ihn ungewollt aufheben)
+- **Musik in der Show** – Ein Musik-/Playlist-Item startet beim Betreten immer
+  von vorne (0:00) und wird beim Verlassen beendet statt nur pausiert
+- **Musik-Ausgabe** – Zeigt nur noch Hintergrundbild oder Schwarz, keinen
+  Datei-/Tracknamen mehr
 - **„Ganzes Lied" Layout überarbeitet** – Automatische, platzfüllende Darstellung
   - Schriftgröße wird per Auto-Fit maximal groß gewählt, ohne überzulaufen
   - Automatische 1- vs. 2-Spalten-Wahl je nach Textmenge
   - Strophen werden nicht mehr mitten durchgeschnitten
   - Vorschau im Lieder-Tab entspricht exakt der Ausgabe
+
+### Behoben
+- Doppeltes Musik-Player-Widget, das gleichzeitig mit dem Vorschau-Panel
+  sichtbar sein konnte
+- Musikwiedergabe pausierte/setzte sich gelegentlich selbstständig fort
 
 ## [1.3.1] - 2026-03-22
 

@@ -9,11 +9,31 @@ export const VIDEO_CTRL_EVENT = "openstage:video-ctrl";
 
 let outputWindowOpening: Promise<WebviewWindow> | null = null;
 let lastOutputPayload: OutputPayload = { mode: "blank" };
+let blackoutActive = false;
+
+/**
+ * Blackout is a hard gate in front of the output windows: while it is active no
+ * payload except the blackout frame itself is allowed through, no matter which
+ * part of the app tries to push one (show queue, countdown tick, slideshow
+ * engine, ...). The screens stay black until the operator turns blackout off.
+ */
+export function setOutputBlackoutActive(active: boolean) {
+  blackoutActive = active;
+}
+
+export function isOutputBlackoutActive() {
+  return blackoutActive;
+}
 
 /** Broadcast a state update to all output windows */
-export async function sendToOutput(payload: OutputPayload) {
+export async function sendToOutput(payload: OutputPayload, opts: { force?: boolean } = {}) {
   try {
-    lastOutputPayload = payload;
+    // Remember what *would* be live so leaving blackout can restore the
+    // current content instead of a stale snapshot from before the blackout.
+    if (payload.mode !== "blackout") lastOutputPayload = payload;
+
+    if (blackoutActive && !opts.force) return;
+
     console.log("[sendToOutput] Sending payload:", payload);
 
     // Emit to all listeners (this is the main way)

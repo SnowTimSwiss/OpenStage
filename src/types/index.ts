@@ -114,11 +114,11 @@ export interface OutputPayload {
     targetTime?: string | null;
     isFadingOut?: boolean;
   };
+  // Music output is deliberately anonymous: the audience sees the background
+  // image (or plain black), never the track/file name.
   music?: {
     src: string;
     playing?: boolean;
-    trackName?: string;
-    artist?: string;
     backgroundImage?: string | null;
   };
 }
@@ -146,7 +146,11 @@ export type ShowItemType =
   | "pdf"
   | "music"
   | "playlist"
-  | "slideshow";
+  | "slideshow"
+  | "blank";
+
+/** Ready-made filler slide: plain black or the configured background image. */
+export type BlankVariant = "black" | "background";
 
 export interface ShowItem {
   id: string;
@@ -157,6 +161,6 @@ export interface ShowItem {
   musicTrackId?: string; // for music: specific track to play
   playlistId?: string; // for playlist: which playlist to play
   slideshowId?: string; // for slideshow: which slideshow to play
-  showMusicOverlay?: boolean; // show title/artist on output (default: true)
+  blankVariant?: BlankVariant; // for blank: black screen or background image
 }
 

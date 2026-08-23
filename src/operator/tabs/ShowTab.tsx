@@ -4,7 +4,14 @@ import { useStore } from "../../store/useStore";
 import { sendToOutput } from "../../lib/events";
 import OutputRenderer from "../../output/OutputRenderer";
 import ContextMenu, { type ContextMenuItem } from "../ContextMenu";
-import type { OutputPayload, ShowItem, MusicItem } from "../../types";
+import type { BlankVariant, OutputPayload, ShowItem } from "../../types";
+
+interface AddItemExtra {
+  musicTrackId?: string;
+  playlistId?: string;
+  slideshowId?: string;
+  blankVariant?: BlankVariant;
+}
 
 function formatTime(s: number) {
   if (!Number.isFinite(s) || s < 0) return "00:00";
@@ -121,8 +128,10 @@ export default function ShowTab() {
     // pushes each frame to the output itself — don't double-drive here.
     const item = current.showQueue[current.showCurrentIndex];
     if (item?.type === "slideshow") return;
-    if (current.outputMode !== outputPayload.mode || current.isBlackout) {
-      useStore.setState({ outputMode: outputPayload.mode, isBlackout: false });
+    // Never clear isBlackout here — blackout stays on until the operator turns
+    // it off, and sendToOutput keeps the screens black while it is active.
+    if (current.outputMode !== outputPayload.mode) {
+      useStore.setState({ outputMode: outputPayload.mode });
     }
     sendToOutput(outputPayload).catch((err) => {
       console.error("[ShowTab] Failed to send to output:", err);
@@ -145,11 +154,7 @@ export default function ShowTab() {
       : { mode: "blank" };
   }, [currentItem, slides, videos, songs, pdfGroups, countdownRemaining, countdownLabel, countdownTheme, music, playlists, slideshows, slideshowRunIndex]);
 
-  function handleAddItem(
-    type: ShowItem["type"],
-    refId?: string,
-    extra?: { musicTrackId?: string; playlistId?: string; slideshowId?: string }
-  ) {
+  function handleAddItem(type: ShowItem["type"], refId?: string, extra?: AddItemExtra) {
     const label = getItemLabel(type, refId, slides, videos, songs, pdfGroups, music, playlists, extra);
     const item: ShowItem = {
       id: crypto.randomUUID(),
@@ -160,41 +165,15 @@ export default function ShowTab() {
       musicTrackId: extra?.musicTrackId,
       playlistId: extra?.playlistId,
       slideshowId: extra?.slideshowId,
+      blankVariant: extra?.blankVariant,
     };
     addToShowQueue(item);
     setIsAddModalOpen(false);
   }
 
-  function toggleShowMusicOverlay(_itemId: string) {
-    // Music overlays on the output are disabled in show mode.
-  }
-
   function handleItemClick(index: number) {
-    const { showQueue, music, playlists } = useStore.getState();
-    const item = showQueue[index];
-    
-    // Handle music playback for music/playlist items
-    if (item && (item.type === "music" || item.type === "playlist")) {
-      let trackToPlay: MusicItem | undefined;
-
-      if (item.type === "music" && item.musicTrackId) {
-        trackToPlay = music.find((m) => m.id === item.musicTrackId);
-      } else if (item.type === "playlist" && item.playlistId) {
-        const playlist = playlists.find((p) => p.id === item.playlistId);
-        if (playlist && playlist.tracks.length > 0) {
-          trackToPlay = playlist.tracks[0];
-        }
-      }
-
-      if (trackToPlay) {
-        const trackIndex = music.findIndex((m) => m.id === trackToPlay!.id);
-        if (trackIndex >= 0) {
-          useStore.getState().setMusicIndex(trackIndex);
-          useStore.getState().setMusicPlaying(true);
-        }
-      }
-    }
-    
+    // Music for music/playlist items starts (and the previous one stops) in the
+    // store as soon as the current item changes.
     setShowCurrentIndex(index);
   }
 
@@ -466,22 +445,6 @@ export default function ShowTab() {
                             {(item.type === "song" || item.type === "pdf") && (
                               <span className="text-[9px] px-1 rounded" style={{ background: "#222", color: "#666" }}>
                                 {currentSlide}/{totalSlides}
-                              </span>
-                            )}
-                            {false && (item.type === "music" || item.type === "playlist") && (
-                              <span
-                                className={`text-[9px] px-1 rounded cursor-pointer transition-colors ${
-                                  item.showMusicOverlay !== false
-                                    ? "bg-[#f9731620] text-[#f97316]"
-                                    : "bg-[#222] text-gray-500"
-                                }`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  toggleShowMusicOverlay(item.id);
-                                }}
-                                title={item.showMusicOverlay !== false ? "Overlay anzeige: Titel & Künstler" : "Overlay aus: Blackscreen"}
-                              >
-                                {item.showMusicOverlay !== false ? "👁" : "🚫"}
                               </span>
                             )}
                           </div>
@@ -835,31 +798,20 @@ function buildOutputPayload(
     case "music": {
       const track = item.musicTrackId ? music.find((m) => m.id === item.musicTrackId) : null;
       if (!track) return { mode: "blank" };
-      return {
-        mode: "music",
-        music: {
-          src: track.src,
-          playing: true,
-          trackName: track.name,
-          artist: track.artist,
-          backgroundImage: musicBackgroundImage,
-        },
-      };
+      return { mode: "music", music: { src: track.src, playing: true, backgroundImage: musicBackgroundImage } };
     }
     case "playlist": {
       const playlist = item.playlistId ? playlists.find((p) => p.id === item.playlistId) : null;
       if (!playlist || playlist.tracks.length === 0) return { mode: "blank" };
-      const track = playlist.tracks[0];
       return {
         mode: "music",
-        music: {
-          src: track.src,
-          playing: true,
-          trackName: track.name,
-          artist: track.artist,
-          backgroundImage: musicBackgroundImage,
-        },
+        music: { src: playlist.tracks[0].src, playing: true, backgroundImage: musicBackgroundImage },
       };
+    }
+    case "blank": {
+      if (item.blankVariant !== "background") return { mode: "blank" };
+      const background = musicBackgroundImage ?? songBackgroundImage;
+      return background ? { mode: "image", image: { src: background } } : { mode: "blank" };
     }
     case "slideshow": {
       // The slideshow engine drives the live output; this is only used for the
@@ -895,6 +847,8 @@ function getItemIcon(type: ShowItem["type"]): string {
       return "📀";
     case "slideshow":
       return "🎞️";
+    case "blank":
+      return "⬛";
   }
 }
 
@@ -907,7 +861,7 @@ function getItemLabel(
   pdfGroups: any[],
   music: any[],
   playlists: any[],
-  extra?: { musicTrackId?: string; playlistId?: string; slideshowId?: string }
+  extra?: AddItemExtra
 ): string {
   switch (type) {
     case "image": {
@@ -941,6 +895,8 @@ function getItemLabel(
       const show = extra?.slideshowId ? slideshows.find((s) => s.id === extra.slideshowId) : null;
       return show ? `Diashow: ${show.name}` : "Diashow";
     }
+    case "blank":
+      return extra?.blankVariant === "background" ? "Hintergrundbild" : "Schwarze Folie";
   }
 }
 
@@ -952,16 +908,17 @@ interface AddToShowModalProps {
   music: any[];
   playlists: any[];
   slideshows: any[];
-  onAdd: (
-    type: ShowItem["type"],
-    refId?: string,
-    extra?: { musicTrackId?: string; playlistId?: string; slideshowId?: string }
-  ) => void;
+  onAdd: (type: ShowItem["type"], refId?: string, extra?: AddItemExtra) => void;
   onClose: () => void;
 }
 
 function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, slideshows, onAdd, onClose }: AddToShowModalProps) {
-  const [activeSection, setActiveSection] = useState<"media" | "songs" | "pdf" | "countdown" | "music" | "slideshow">("media");
+  const [activeSection, setActiveSection] = useState<
+    "media" | "songs" | "pdf" | "countdown" | "music" | "slideshow" | "blank"
+  >("media");
+  const musicBackgroundImage = useStore((s) => s.musicBackgroundImage);
+  const songBackgroundImage = useStore((s) => s.songBackgroundImage);
+  const backgroundImage = musicBackgroundImage ?? songBackgroundImage;
   const [searchQuery, setSearchQuery] = useState("");
   const normalizedSearch = searchQuery.trim().toLowerCase();
 
@@ -991,7 +948,7 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, sl
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={onClose}>
       <div
-        className="w-[500px] max-h-[80vh] rounded-xl overflow-hidden flex flex-col"
+        className="w-[580px] max-h-[80vh] rounded-xl overflow-hidden flex flex-col"
         style={{ background: "#1a1a1a", border: "1px solid #333" }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -1044,6 +1001,14 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, sl
             🎞️ Diashow
           </button>
           <button
+            onClick={() => setActiveSection("blank")}
+            className={`flex-1 text-xs py-2 transition-all ${
+              activeSection === "blank" ? "text-[#f97316] border-b-2 border-[#f97316]" : "text-[#888]"
+            }`}
+          >
+            ⬛ Folien
+          </button>
+          <button
             onClick={() => setActiveSection("countdown")}
             className={`flex-1 text-xs py-2 transition-all ${
               activeSection === "countdown" ? "text-[#f97316] border-b-2 border-[#f97316]" : "text-[#888]"
@@ -1053,7 +1018,7 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, sl
           </button>
         </div>
 
-        {activeSection !== "countdown" && (
+        {activeSection !== "countdown" && activeSection !== "blank" && (
           <div className="px-3 py-3 border-b" style={{ borderColor: "#333" }}>
             <input
               type="search"
@@ -1227,6 +1192,53 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, sl
                   </button>
                 ))
               )}
+            </div>
+          )}
+
+          {activeSection === "blank" && (
+            <div className="space-y-2">
+              <button
+                onClick={() => onAdd("blank", undefined, { blankVariant: "black" })}
+                className="w-full flex items-center gap-3 p-3 rounded-lg transition-all hover:bg-[#222]"
+                style={{ background: "#141414", border: "1px solid #222" }}
+              >
+                <span
+                  className="w-14 h-9 rounded shrink-0"
+                  style={{ background: "#000", border: "1px solid #333" }}
+                />
+                <div className="text-left">
+                  <p className="text-sm font-medium" style={{ color: "#ccc" }}>
+                    Schwarze Folie
+                  </p>
+                  <p className="text-xs" style={{ color: "#666" }}>
+                    Komplett schwarze Folie für Pausen und Übergänge
+                  </p>
+                </div>
+              </button>
+
+              <button
+                onClick={() => onAdd("blank", undefined, { blankVariant: "background" })}
+                className="w-full flex items-center gap-3 p-3 rounded-lg transition-all hover:bg-[#222]"
+                style={{ background: "#141414", border: "1px solid #222" }}
+              >
+                <span
+                  className="w-14 h-9 rounded shrink-0 bg-black bg-cover bg-center"
+                  style={{
+                    border: "1px solid #333",
+                    backgroundImage: backgroundImage ? `url(${backgroundImage})` : undefined,
+                  }}
+                />
+                <div className="text-left">
+                  <p className="text-sm font-medium" style={{ color: "#ccc" }}>
+                    Hintergrundbild
+                  </p>
+                  <p className="text-xs" style={{ color: "#666" }}>
+                    {backgroundImage
+                      ? "Zeigt das eingestellte Hintergrundbild"
+                      : "Noch kein Hintergrundbild gesetzt — zeigt Schwarz"}
+                  </p>
+                </div>
+              </button>
             </div>
           )}
 

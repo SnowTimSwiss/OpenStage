@@ -19,16 +19,16 @@ export default function OperatorApp() {
   const showQueue = useStore((s) => s.showQueue);
   const showCurrentIndex = useStore((s) => s.showCurrentIndex);
 
-  // The floating music island is the always-available fallback transport. We hide
-  // it whenever the current view already exposes its own music controls, so there
-  // is never the floating island AND an inline control on screen at the same time:
-  //  - normal tabs render the PreviewPanel (which has a music transport)
-  //  - the show tab renders inline music controls when the current item is music
-  //  - the slideshow tab has no inline transport, so the island stays visible there
+  // Exactly one music transport is on screen at any time. The music tab brings
+  // its own full player, the show tab shows inline controls while a music item
+  // is live, every other tab gets the one in the PreviewPanel — and the floating
+  // island fills in wherever none of those apply (e.g. the slideshow tab).
   const currentShowItem =
     showCurrentIndex >= 0 && showCurrentIndex < showQueue.length ? showQueue[showCurrentIndex] : null;
+  const previewMusicControlsVisible = activeTab !== "show" && activeTab !== "slideshow" && activeTab !== "music";
   const inlineMusicControlsVisible =
-    (activeTab !== "show" && activeTab !== "slideshow") ||
+    activeTab === "music" ||
+    previewMusicControlsVisible ||
     (activeTab === "show" && (currentShowItem?.type === "music" || currentShowItem?.type === "playlist"));
 
   useEffect(() => {
@@ -77,7 +77,9 @@ export default function OperatorApp() {
           {activeTab === "show" && <ShowTab />}
           {activeTab === "slideshow" && <SlideshowTab />}
         </main>
-        {activeTab !== "show" && activeTab !== "slideshow" && <PreviewPanel />}
+        {activeTab !== "show" && activeTab !== "slideshow" && (
+          <PreviewPanel showMusicControls={previewMusicControlsVisible} />
+        )}
       </div>
       {!inlineMusicControlsVisible && <MusicOverlay />}
     </div>
@@ -91,7 +93,7 @@ function formatTime(s: number) {
   return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 }
 
-function PreviewPanel() {
+function PreviewPanel({ showMusicControls }: { showMusicControls: boolean }) {
   const outputMode = useStore((s) => s.outputMode);
   const isBlackout = useStore((s) => s.isBlackout);
   const activeSongId = useStore((s) => s.activeSongId);
@@ -219,7 +221,7 @@ function PreviewPanel() {
         )}
       </div>
 
-      {currentMusic && (
+      {currentMusic && showMusicControls && (
         <div className="px-3 py-3 border-t" style={{ borderColor: "#1a1a1a" }}>
           <div className="text-[10px] uppercase tracking-widest mb-2" style={{ color: "#555" }}>
             Musik

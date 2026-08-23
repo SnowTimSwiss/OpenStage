@@ -10,13 +10,14 @@ import {
   assignOutputWindowToMonitor,
   closeOutputWindowForMonitor,
   closeAllOutputWindows as closeAllOutputFn,
+  setOutputBlackoutActive,
   OUTPUT_READY_EVENT,
 } from "../lib/events";
 import { secondsUntilTargetTime } from "../lib/formatTime";
 import { getSongEffectiveSlideCount, getSongPresentation } from "../lib/songPresentation";
 import type {
   Song, MediaItem, MusicItem, Playlist, MusicSource,
-  Monitor, TabId, OutputMode, OutputPayload, PdfGroup, CountdownTheme, ShowItem,
+  Monitor, TabId, OutputMode, PdfGroup, CountdownTheme, ShowItem,
   Slideshow, SlideshowItem,
 } from "../types";
 
@@ -46,9 +47,21 @@ let countdownBgStartOffsetSeconds = 0;
 let countdownEndTime: number | null = null;
 let countdownFadeOutTimeout: ReturnType<typeof setTimeout> | null = null;
 let outputReadyListenerInitialized = false;
-let blackoutRestorePayload: OutputPayload | null = null;
 let slideshowTimer: ReturnType<typeof setTimeout> | null = null;
 let slideshowStartedMusic = false;
+// True while the track currently loaded in the music engine was started by a
+// music/playlist item of the show queue. Only that music is stopped again when
+// the show moves on — music the operator started from the music tab is left
+// alone.
+let showOwnsMusic = false;
+// Set while a fade-out should end the track (rewind to 0:00) instead of just
+// pausing it — see stopMusic.
+let musicEndAfterFadeOut = false;
+// Id of the show item the music engine was last synced to. Restoring a saved
+// show seeds it without playing anything, so opening the app never starts music
+// on its own.
+let lastShowMusicItemId: string | null = null;
+let showMusicSyncQueued = false;
 
 function formatUnknownError(err: unknown): string {
   if (err instanceof Error) return `${err.name}: ${err.message}`;
@@ -79,6 +92,12 @@ function initOutputReplayListener() {
   outputReadyListenerInitialized = true;
 
   void listen(OUTPUT_READY_EVENT, () => {
+    // A window opened during blackout has to come up black, not with whatever
+    // is staged behind it.
+    if (useStore.getState().isBlackout) {
+      void sendToOutput({ mode: "blackout" }, { force: true });
+      return;
+    }
     void sendToOutput(getLastOutputPayload());
   });
 }
@@ -97,6 +116,19 @@ function clearMusicFade() {
     clearInterval(musicFadeInterval);
     musicFadeInterval = null;
   }
+}
+
+/**
+ * The store is the single source of truth for playback: the element never
+ * reports back that it paused. It only tells us when it could not start at all,
+ * so the transport buttons don't get stuck on "playing".
+ */
+function playMusicElement(a: HTMLAudioElement) {
+  void a.play().catch((err: unknown) => {
+    // An AbortError just means a newer src/play call superseded this one.
+    if (err && typeof err === "object" && (err as { name?: string }).name === "AbortError") return;
+    useStore.setState({ musicPlaying: false });
+  });
 }
 
 function ensureBackgroundMusicAudio(): HTMLAudioElement | null {
@@ -604,6 +636,8 @@ interface Store {
   resetAllMusic: () => void;
   setMusicIndex: (i: number) => void;
   setMusicPlaying: (p: boolean) => void;
+  playMusicFromStart: (index?: number) => void;
+  stopMusic: () => void;
   toggleMusicPlaying: () => void;
   playNextMusic: () => void;
   playPrevMusic: () => void;
@@ -693,28 +727,30 @@ export const useStore = create<Store>((set, get) => ({
   outputMode: "blank",
   isBlackout: false,
 
+  // Blackout is a kill switch: only these two actions (and the B key, which
+  // calls toggleBlackout) can lift it. Going live with a slide/song/video while
+  // it is on stages that content behind the black screen instead of revealing
+  // it — the outputs stay black until the operator says otherwise.
   toggleBlackout: () => {
-    const next = !get().isBlackout;
-    if (next) {
-      const currentPayload = getLastOutputPayload();
-      if (currentPayload.mode !== "blackout") {
-        blackoutRestorePayload = currentPayload;
-      }
+    if (!get().isBlackout) {
+      // set() closes the gate synchronously via the subscription below, so the
+      // blackout frame itself has to be forced through it.
       set({ isBlackout: true });
-      sendToOutput({ mode: "blackout" });
+      void sendToOutput({ mode: "blackout" }, { force: true });
       return;
     }
 
-    const restorePayload = blackoutRestorePayload ?? { mode: "blank" };
-    blackoutRestorePayload = null;
-    set({ isBlackout: false, outputMode: restorePayload.mode === "blackout" ? "blank" : restorePayload.mode });
-    sendToOutput(restorePayload.mode === "blackout" ? { mode: "blank" } : restorePayload);
+    // getLastOutputPayload() kept tracking what the app wanted on screen while
+    // the gate was closed, so we resume with the *current* content.
+    const restorePayload = getLastOutputPayload();
+    const isStale = restorePayload.mode === "blackout";
+    set({ isBlackout: false, outputMode: isStale ? "blank" : restorePayload.mode });
+    void sendToOutput(isStale ? { mode: "blank" } : restorePayload);
   },
 
   clearOutput: () => {
-    blackoutRestorePayload = null;
     set({ outputMode: "blank", isBlackout: false, activeSlideId: null, activeVideoId: null });
-    sendToOutput({ mode: "blank" });
+    void sendToOutput({ mode: "blank" });
   },
 
   // ── Slides ──────────────────────────────────────────────────────────────
@@ -813,7 +849,7 @@ export const useStore = create<Store>((set, get) => ({
   goLiveSlide: (id) => {
     const slide = get().slides.find((s) => s.id === id);
     if (!slide) return;
-    set({ activeSlideId: id, outputMode: "image", isBlackout: false });
+    set({ activeSlideId: id, outputMode: "image" });
     sendToOutput({ mode: "image", image: { src: slide.src } });
   },
 
@@ -931,7 +967,7 @@ export const useStore = create<Store>((set, get) => ({
     const group = get().pdfGroups.find((g) => g.id === groupId);
     if (!group || !group.pages[pageIndex]) return;
     const page = group.pages[pageIndex];
-    set({ activeSlideId: page.id, outputMode: "image", isBlackout: false });
+    set({ activeSlideId: page.id, outputMode: "image" });
     sendToOutput({ mode: "image", image: { src: page.src } });
   },
 
@@ -987,7 +1023,6 @@ export const useStore = create<Store>((set, get) => ({
       activeSongId: songId,
       activeSongSlide: presentation.index,
       outputMode: "song",
-      isBlackout: false,
     });
 
     sendToOutput({
@@ -1185,7 +1220,7 @@ export const useStore = create<Store>((set, get) => ({
 
         countdownFadeOutTimeout = setTimeout(() => {
           sendToOutput({ mode: "blackout" });
-          set({ outputMode: "blackout", isBlackout: false });
+          set({ outputMode: "blackout" });
           countdownFadeOutTimeout = null;
         }, 1200);
       }, countdownDisplayAfterZeroSeconds * 1000);
@@ -1230,7 +1265,7 @@ export const useStore = create<Store>((set, get) => ({
       updateCountdownBgVolume(get().countdownRemaining);
       return;
     }
-    set({ countdownLive: true, outputMode: "countdown", isBlackout: false });
+    set({ countdownLive: true, outputMode: "countdown" });
     sendCurrentCountdownToOutput({}, true);
     updateCountdownBgVolume(get().countdownRemaining);
   },
@@ -1275,7 +1310,7 @@ export const useStore = create<Store>((set, get) => ({
     const startTime = get().videoStartTime ?? undefined;
     const endTime = get().videoEndTime ?? undefined;
     if (!video) return;
-    set({ activeVideoId: id, outputMode: "video", isBlackout: false });
+    set({ activeVideoId: id, outputMode: "video" });
     sendToOutput({ mode: "video", video: { src: video.src, playing: true, startTime, endTime } });
   },
 
@@ -1447,10 +1482,15 @@ export const useStore = create<Store>((set, get) => ({
     // runs, syncFromState leaves the element alone (see initMusicEngine), so
     // this is the single owner of volume + play/pause during the transition.
     clearMusicFade();
+    musicEndAfterFadeOut = false;
 
     const fadeSteps = 20;
     const stepTime = Math.max(1, (fadeDuration * 1000) / fadeSteps);
 
+    // Both branches arm the fade *before* the set() call: set() runs
+    // syncFromState synchronously, which would otherwise snap the volume to the
+    // target (swallowing the fade-in) or pause the element on the spot
+    // (swallowing the fade-out).
     if (p) {
       const current = get().music[get().musicIndex];
       if (!current?.src) {
@@ -1460,8 +1500,7 @@ export const useStore = create<Store>((set, get) => ({
       // Fade in towards the configured target volume.
       const target = get().musicVolume;
       a.volume = 0;
-      a.play().catch(() => {});
-      set({ musicPlaying: true });
+      playMusicElement(a);
 
       let step = 0;
       musicFadeInterval = setInterval(() => {
@@ -1472,10 +1511,10 @@ export const useStore = create<Store>((set, get) => ({
           clearMusicFade();
         }
       }, stepTime);
+
+      set({ musicPlaying: true });
     } else {
-      // Fade out, then pause once silent (state flips immediately so the UI
-      // reflects the user's intent right away).
-      set({ musicPlaying: false });
+      // Fade out, then pause once silent.
       const startVolume = a.volume;
       let step = 0;
       musicFadeInterval = setInterval(() => {
@@ -1483,24 +1522,89 @@ export const useStore = create<Store>((set, get) => ({
         a.volume = Math.max(0, startVolume * (1 - step / fadeSteps));
         if (step >= fadeSteps) {
           a.pause();
+          if (musicEndAfterFadeOut) {
+            musicEndAfterFadeOut = false;
+            try {
+              a.currentTime = 0;
+            } catch {
+              // ignore
+            }
+            set({ musicCurrentTime: 0 });
+          }
           a.volume = get().musicVolume; // restore for the next track
           clearMusicFade();
         }
       }, stepTime);
+
+      // The state flips right away so the UI reflects the user's intent.
+      set({ musicPlaying: false });
     }
+  },
+
+  /** Rewind to 0:00 and play — used everywhere a track is *entered*. */
+  playMusicFromStart: (index) => {
+    const a = ensureMusicAudio();
+    const nextIndex = index ?? get().musicIndex;
+    if (nextIndex < 0 || nextIndex >= get().music.length) return;
+
+    clearMusicFade();
+    // Set the index first so the engine can swap the src, then rewind: a track
+    // that is already loaded would otherwise resume where it left off.
+    set({ musicIndex: nextIndex, musicCurrentTime: 0 });
+    if (a) {
+      try {
+        a.currentTime = 0;
+      } catch {
+        // Seeking before metadata is loaded throws; the engine resets it anyway.
+      }
+    }
+    get().setMusicPlaying(true);
+  },
+
+  /**
+   * Ends the track instead of pausing it: it fades out (as configured) and is
+   * then rewound, so the next start always begins at 0:00.
+   */
+  stopMusic: () => {
+    const a = ensureMusicAudio();
+
+    if (a && !a.paused) {
+      get().setMusicPlaying(false);
+      musicEndAfterFadeOut = true;
+      return;
+    }
+
+    clearMusicFade();
+    musicEndAfterFadeOut = false;
+    if (a) {
+      try {
+        a.currentTime = 0;
+      } catch {
+        // ignore
+      }
+      a.volume = get().musicVolume;
+    }
+    set({ musicPlaying: false, musicCurrentTime: 0 });
   },
 
   toggleMusicPlaying: () => get().setMusicPlaying(!get().musicPlaying),
 
   playNextMusic: () => {
-    const { music, musicIndex, setMusicIndex, setMusicPlaying, showQueue, advanceShowOnMusicEnd } = get();
+    const { music, musicIndex, playMusicFromStart, showQueue, advanceShowOnMusicEnd } = get();
     if (music.length === 0) return;
     
-    // Check if we're in a playlist context (for show mode)
-    // If current music is part of a playlist item in show, handle playlist advancement
+    // Only music that a show item started follows the show queue; music the
+    // operator started from the music tab always just rolls on to the next file.
     const { playlists } = get();
-    const currentShowItem = showQueue.length > 0 ? showQueue[get().showCurrentIndex] : null;
-    
+    const currentShowItem = showOwnsMusic ? showQueue[get().showCurrentIndex] : null;
+
+    // A single music item is bound to exactly one track, so "next" hands
+    // control back to the show instead of pulling in an unrelated file.
+    if (currentShowItem?.type === "music") {
+      advanceShowOnMusicEnd();
+      return;
+    }
+
     // If we're in show mode with a playlist item, check if we should advance show
     if (currentShowItem && currentShowItem.type === "playlist" && currentShowItem.playlistId) {
       const playlist = playlists.find((p) => p.id === currentShowItem.playlistId);
@@ -1513,9 +1617,7 @@ export const useStore = create<Store>((set, get) => ({
           const nextTrack = playlist.tracks[nextTrackIndex];
           const nextTrackGlobalIndex = music.findIndex((m) => m.id === nextTrack.id);
           if (nextTrackGlobalIndex >= 0) {
-            setMusicIndex(nextTrackGlobalIndex);
-            set({ musicCurrentTime: 0 });
-            setMusicPlaying(true);
+            playMusicFromStart(nextTrackGlobalIndex);
             return;
           }
         }
@@ -1532,22 +1634,18 @@ export const useStore = create<Store>((set, get) => ({
       next = (next + 1) % music.length;
       if (music[next]?.src) break;
     }
-    setMusicIndex(next);
-    set({ musicCurrentTime: 0 });
-    setMusicPlaying(true);
+    playMusicFromStart(next);
   },
 
   playPrevMusic: () => {
-    const { music, musicIndex, setMusicIndex, setMusicPlaying } = get();
+    const { music, musicIndex, playMusicFromStart } = get();
     if (music.length === 0) return;
     let prev = musicIndex;
     for (let i = 0; i < music.length; i++) {
       prev = (prev - 1 + music.length) % music.length;
       if (music[prev]?.src) break;
     }
-    setMusicIndex(prev);
-    set({ musicCurrentTime: 0 });
-    setMusicPlaying(true);
+    playMusicFromStart(prev);
   },
 
   seekMusic: (time) => {
@@ -1774,64 +1872,18 @@ export const useStore = create<Store>((set, get) => ({
     }));
   },
 
+  // Music for music/playlist items is handled centrally by the show-music
+  // subscription, which reacts to every change of the current item.
   showNext: () => {
-    const { showQueue, showCurrentIndex, music, playlists } = get();
+    const { showQueue, showCurrentIndex } = get();
     if (showQueue.length === 0) return;
-    const nextIndex = Math.min(showQueue.length - 1, showCurrentIndex + 1);
-    
-    // Handle music playback for music/playlist items
-    const nextItem = showQueue[nextIndex];
-    if (nextItem && (nextItem.type === "music" || nextItem.type === "playlist")) {
-      let trackToPlay: MusicItem | undefined;
-      
-      if (nextItem.type === "music" && nextItem.musicTrackId) {
-        trackToPlay = music.find((m) => m.id === nextItem.musicTrackId);
-      } else if (nextItem.type === "playlist" && nextItem.playlistId) {
-        const playlist = playlists.find((p) => p.id === nextItem.playlistId);
-        if (playlist && playlist.tracks.length > 0) {
-          trackToPlay = playlist.tracks[0];
-        }
-      }
-      
-      if (trackToPlay) {
-        const trackIndex = music.findIndex((m) => m.id === trackToPlay!.id);
-        if (trackIndex >= 0) {
-          set({ musicIndex: trackIndex, musicPlaying: true });
-        }
-      }
-    }
-    
-    set({ showCurrentIndex: nextIndex });
+    set({ showCurrentIndex: Math.min(showQueue.length - 1, showCurrentIndex + 1) });
   },
 
   showPrevious: () => {
-    const { showQueue, showCurrentIndex, music, playlists } = get();
+    const { showQueue, showCurrentIndex } = get();
     if (showQueue.length === 0) return;
-    const prevIndex = Math.max(0, showCurrentIndex - 1);
-    
-    // Handle music playback for music/playlist items
-    const prevItem = showQueue[prevIndex];
-    if (prevItem && (prevItem.type === "music" || prevItem.type === "playlist")) {
-      let trackToPlay: MusicItem | undefined;
-      
-      if (prevItem.type === "music" && prevItem.musicTrackId) {
-        trackToPlay = music.find((m) => m.id === prevItem.musicTrackId);
-      } else if (prevItem.type === "playlist" && prevItem.playlistId) {
-        const playlist = playlists.find((p) => p.id === prevItem.playlistId);
-        if (playlist && playlist.tracks.length > 0) {
-          trackToPlay = playlist.tracks[0];
-        }
-      }
-      
-      if (trackToPlay) {
-        const trackIndex = music.findIndex((m) => m.id === trackToPlay!.id);
-        if (trackIndex >= 0) {
-          set({ musicIndex: trackIndex, musicPlaying: true });
-        }
-      }
-    }
-    
-    set({ showCurrentIndex: prevIndex });
+    set({ showCurrentIndex: Math.max(0, showCurrentIndex - 1) });
   },
 
   // Advance show to next item (called when music track ends)
@@ -2224,6 +2276,7 @@ function loadLibrary() {
     const showQueue = Array.isArray(parsed.showQueue) ? parsed.showQueue : [];
     const showCurrentIndex = typeof parsed.showCurrentIndex === "number" ? parsed.showCurrentIndex : -1;
 
+    lastShowMusicItemId = showQueue[showCurrentIndex]?.id ?? null;
     useStore.setState({
       slides,
       videos,
@@ -2283,10 +2336,10 @@ function loadShow() {
     const saved = localStorage.getItem(SHOW_STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
-      useStore.setState({
-        showQueue: Array.isArray(parsed.showQueue) ? parsed.showQueue : [],
-        showCurrentIndex: typeof parsed.showCurrentIndex === "number" ? parsed.showCurrentIndex : -1,
-      });
+      const showQueue: ShowItem[] = Array.isArray(parsed.showQueue) ? parsed.showQueue : [];
+      const showCurrentIndex = typeof parsed.showCurrentIndex === "number" ? parsed.showCurrentIndex : -1;
+      lastShowMusicItemId = showQueue[showCurrentIndex]?.id ?? null;
+      useStore.setState({ showQueue, showCurrentIndex });
     }
   } catch {
     console.warn("Could not load show");
@@ -2348,17 +2401,15 @@ function resolveSlideshowFrameSrc(show: Slideshow, index: number): string | null
   return slide?.src ?? null;
 }
 
-/** Pushes the current slideshow image to the output (unless blacked out). */
+/** Pushes the current slideshow image to the output (held back while blacked out). */
 function sendSlideshowFrame() {
   const show = getRunningSlideshow();
   if (!show || show.items.length === 0) return;
-  const { slideshowRunIndex, isBlackout } = useStore.getState();
+  const { slideshowRunIndex } = useStore.getState();
   const src = resolveSlideshowFrameSrc(show, slideshowRunIndex);
   if (!src) return;
   useStore.setState({ outputMode: "image" });
-  if (!isBlackout) {
-    void sendToOutput({ mode: "image", image: { src } });
-  }
+  void sendToOutput({ mode: "image", image: { src } });
 }
 
 function scheduleSlideshowAdvance() {
@@ -2413,7 +2464,6 @@ function startSlideshowEngine(id: string, startIndex = 0) {
     activeSlideshowId: id,
     slideshowRunIndex: Math.max(0, Math.min(startIndex, show.items.length - 1)),
     slideshowPlaying: true,
-    isBlackout: false,
   });
   if (show.backgroundPlaylistId) {
     useStore.getState().loadPlaylist(show.backgroundPlaylistId);
@@ -2481,7 +2531,8 @@ function initMusicEngine() {
     const current = s.music[s.musicIndex];
 
     const nextSrc = current?.src ?? "";
-    if (nextSrc && musicAudioSrc !== nextSrc) {
+    const srcChanged = Boolean(nextSrc) && musicAudioSrc !== nextSrc;
+    if (srcChanged) {
       a.src = nextSrc;
       musicAudioSrc = nextSrc;
       try {
@@ -2495,14 +2546,19 @@ function initMusicEngine() {
     // During a fade, setMusicPlaying owns volume + play/pause exclusively.
     // Touching the element here would override the fade and make playback
     // stutter, so we only kept the src in sync above and bail out.
-    if (musicFadeInterval) return;
+    if (musicFadeInterval) {
+      // Loading a new src pauses the element. The fade only ramps the volume,
+      // so without this the track would stay silent for the whole fade.
+      if (srcChanged && s.musicPlaying) playMusicElement(a);
+      return;
+    }
 
     if (Number.isFinite(s.musicVolume) && a.volume !== s.musicVolume) {
       a.volume = s.musicVolume;
     }
 
     if (s.musicPlaying) {
-      if (a.paused) a.play().catch(() => {});
+      if (a.paused) playMusicElement(a);
     } else if (!a.paused) {
       a.pause();
     }
@@ -2516,15 +2572,16 @@ function initMusicEngine() {
     useStore.setState({ musicDuration: Number.isFinite(a.duration) ? a.duration : 0 });
   });
 
-  a.addEventListener("play", () => {
-    useStore.setState({ musicPlaying: true });
-  });
-
-  a.addEventListener("pause", () => {
-    useStore.setState({ musicPlaying: false });
-  });
+  // No "play"/"pause" listeners on purpose: the element pauses itself whenever
+  // its src is swapped, and mirroring that back into musicPlaying made the
+  // store flip to "paused" mid-track. syncFromState would then pause the track
+  // for real as soon as the next state update came in — that was the random
+  // pausing/unpausing during a show. State drives the element, never back.
 
   a.addEventListener("ended", () => {
+    // Clear the flag first: if nothing follows (last item of a show, single
+    // track without a queue), the transport must not stay stuck on "playing".
+    useStore.setState({ musicPlaying: false });
     useStore.getState().playNextMusic();
   });
 
@@ -2572,6 +2629,77 @@ useStore.subscribe((state, prevState) => {
   if (state.slideshows !== prevState.slideshows) {
     saveSlideshows();
   }
+});
+
+/**
+ * Which track in the music queue a music/playlist show item starts with. For
+ * playlist items the playlist is loaded into the queue first, so the tracks are
+ * addressable even if the operator never opened that playlist in the music tab.
+ */
+function resolveShowItemTrackIndex(item: ShowItem | undefined): number {
+  if (!item) return -1;
+  const state = useStore.getState();
+
+  if (item.type === "music" && item.musicTrackId) {
+    return state.music.findIndex((m) => m.id === item.musicTrackId);
+  }
+
+  if (item.type === "playlist" && item.playlistId) {
+    const playlist = state.playlists.find((p) => p.id === item.playlistId);
+    const firstTrack = playlist?.tracks[0];
+    if (!firstTrack) return -1;
+    if (state.activePlaylistId !== playlist!.id) state.loadPlaylist(playlist!.id);
+    return useStore.getState().music.findIndex((m) => m.id === firstTrack.id);
+  }
+
+  return -1;
+}
+
+/**
+ * Music in a show belongs to its queue item: entering the item always restarts
+ * the track from 0:00 (wherever it was left before), and leaving the item ends
+ * playback instead of merely pausing it.
+ */
+function applyShowMusicForItem(item: ShowItem | undefined) {
+  if (showOwnsMusic) {
+    useStore.getState().stopMusic();
+    showOwnsMusic = false;
+  }
+
+  if (item?.type !== "music" && item?.type !== "playlist") return;
+
+  const trackIndex = resolveShowItemTrackIndex(item);
+  if (trackIndex < 0) return;
+  useStore.getState().playMusicFromStart(trackIndex);
+  showOwnsMusic = true;
+}
+
+// The output gate mirrors isBlackout, so every path that flips the flag (the
+// blackout button, the B key, clearOutput) opens/closes the gate as well.
+useStore.subscribe((state, prevState) => {
+  if (prevState && state.isBlackout === prevState.isBlackout) return;
+  setOutputBlackoutActive(state.isBlackout);
+});
+
+// Restart/stop show music when the show navigates onto/off a music item.
+// Registered before the slideshow subscriber below so that a slideshow item's
+// background playlist survives the stop that leaving a music item triggers.
+// The check is deferred to a microtask so a burst of set() calls (reordering the
+// queue moves the item first and follows it with the index second) is judged by
+// its end result and doesn't restart the running track.
+useStore.subscribe(() => {
+  if (showMusicSyncQueued) return;
+  showMusicSyncQueued = true;
+
+  queueMicrotask(() => {
+    showMusicSyncQueued = false;
+    const state = useStore.getState();
+    const item = state.showQueue[state.showCurrentIndex];
+    const itemId = item?.id ?? null;
+    if (itemId === lastShowMusicItemId) return;
+    lastShowMusicItemId = itemId;
+    applyShowMusicForItem(item);
+  });
 });
 
 // Start/stop the slideshow engine when the show navigates onto/off a slideshow item.

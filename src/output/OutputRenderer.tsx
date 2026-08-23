@@ -185,9 +185,11 @@ export default function OutputRenderer({
   }
 
   if (mode === "music" && state.music) {
+    // Audio only: the audience must never see the track or file name, just the
+    // configured background image (or plain black when none is set).
     return (
       <div
-        className={`${rootClassName} bg-black flex items-center justify-center transition-opacity duration-300 relative overflow-hidden`}
+        className={`${rootClassName} bg-black transition-opacity duration-300`}
         style={{
           ...transitionStyle,
           backgroundImage: state.music.backgroundImage ? `url(${state.music.backgroundImage})` : undefined,
@@ -195,37 +197,7 @@ export default function OutputRenderer({
           backgroundPosition: "center",
           backgroundRepeat: "no-repeat",
         }}
-      >
-        {state.music.backgroundImage && (
-          <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.58)" }} />
-        )}
-        <div className="relative z-10 text-center px-12">
-          {state.music.trackName && (
-            <p
-              className="text-white font-medium mb-2"
-              style={{
-                fontSize: compact ? "1.25rem" : "2.5rem",
-                fontFamily: "'Sora', sans-serif",
-                textShadow: "0 2px 20px rgba(0,0,0,0.8)",
-              }}
-            >
-              {state.music.trackName}
-            </p>
-          )}
-          {state.music.artist && (
-            <p
-              className="text-white/60"
-              style={{
-                fontSize: compact ? "0.875rem" : "1.5rem",
-                fontFamily: "'Sora', sans-serif",
-                textShadow: "0 2px 20px rgba(0,0,0,0.8)",
-              }}
-            >
-              {state.music.artist}
-            </p>
-          )}
-        </div>
-      </div>
+      />
     );
   }
 
