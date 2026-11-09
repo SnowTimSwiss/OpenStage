@@ -40,6 +40,18 @@ Entwickelt für alle, die die Technik hinter der Bühne steuern – nicht nur f�
 ### Downloads
 Lade die neueste Version von der [Releases-Seite](https://github.com/snowtimswiss/openstage/releases) herunter.
 
+| System | Datei | Hinweis |
+| --- | --- | --- |
+| Windows | `openstage-<version>-windows-x64-installer.msi` | Installer (MSI) |
+| Windows | `openstage-<version>-windows-x64-setup.exe` | Installer (NSIS) |
+| Windows | `openstage-<version>-windows-x64-portable.zip` | Portable, entpacken und starten |
+| Linux | `openstage-<version>-linux-amd64.deb` | Debian / Ubuntu |
+| Linux | `openstage-<version>-linux-x86_64.rpm` | Fedora / openSUSE |
+| Linux | `openstage-<version>-linux-x86_64.flatpak` | `flatpak install openstage-<version>-linux-x86_64.flatpak` |
+
+Die gebündelte LibreOffice-Komponente ist in jedem Paket enthalten, es muss
+nichts zusätzlich installiert werden.
+
 ---
 
 ## 🚀 Erste Schritte

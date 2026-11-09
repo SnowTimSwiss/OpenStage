@@ -9,7 +9,7 @@ Expected layout after staging, matching what `find_libreoffice()` in
 `src-tauri/src/lib.rs` looks for:
 
 ```
-resources/libreoffice/program/soffice        # Linux / macOS
+resources/libreoffice/program/soffice        # Linux
 resources/libreoffice/program/soffice.exe    # Windows
 ```
 
@@ -23,6 +23,11 @@ cp -r /usr/lib/libreoffice/program src-tauri/resources/libreoffice/program
 cp -r /usr/lib/libreoffice/share src-tauri/resources/libreoffice/share
 ```
 
-The CI workflow downloads the official LibreOffice "still" release per OS/arch
-instead of relying on a system install. See `release.yml` for the exact steps
-and `src-tauri/LICENSES/libreoffice/` for the bundled license texts.
+The CI workflow downloads the official LibreOffice "still" release for
+Windows and Linux instead of relying on a system install. See `release.yml`
+for the exact steps and `src-tauri/LICENSES/libreoffice/` for the bundled
+license texts.
+
+On Windows the staged tree is also copied next to the portable executable:
+a bare `.exe` has no resources beside it, and that is where Tauri resolves
+`resource_dir()` to.

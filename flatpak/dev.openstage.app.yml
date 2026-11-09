@@ -1,0 +1,55 @@
+# Flatpak packaging for OpenStage.
+#
+# The app is *not* compiled inside the sandbox: CI runs `tauri build` (deb/rpm)
+# first, extracts the resulting .deb into staging/ and this manifest only
+# installs that tree under /app. That keeps the Flatpak identical to the other
+# Linux packages (same binary, same bundled LibreOffice) and avoids a second
+# 15-minute Rust build. In CI the staging directory is
+# .ci-packaging/flatpak/stage (the manifest is taken from main so that older
+# tags without this file can be repackaged too).
+#
+# Build locally (after staging the tree):
+#   mkdir -p flatpak/stage && dpkg-deb -x src-tauri/target/release/bundle/deb/*.deb /tmp/x
+#   cp -a /tmp/x/usr/. flatpak/stage/
+#   flatpak-builder --user --force-clean --disable-rofiles-fuse \
+#     --repo=flatpak/repo flatpak/build flatpak/dev.openstage.app.yml
+#   flatpak build-bundle flatpak/repo openstage.flatpak dev.openstage.app
+
+id: dev.openstage.app
+# org.gnome.Platform provides the GTK3 + WebKitGTK 4.1 stack Tauri links
+# against, so nothing extra has to be bundled at runtime.
+runtime: org.gnome.Platform
+runtime-version: '50'
+sdk: org.gnome.Sdk
+command: openstage
+
+finish-args:
+  # Windowing / rendering
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # The app reads the user's own media (images, videos, audio, PPTX, songs)
+  # and writes its library there as well.
+  - --filesystem=home
+  - --filesystem=/run/media
+  # Spotify metadata lookup and update checks
+  - --share=network
+
+modules:
+  - name: openstage
+    buildsystem: simple
+    build-commands:
+      # The staged tree is already the final layout: bin/, lib/, share/.
+      - cp -a . /app/
+      - test -x /app/bin/openstage
+      # Rename the desktop file to the app id so the Flatpak shows up as
+      # dev.openstage.app in the desktop environment.
+      - |
+        for desktop in /app/share/applications/*.desktop; do
+          [ -e "$desktop" ] || continue
+          mv "$desktop" "/app/share/applications/${FLATPAK_ID}.desktop"
+        done
+    sources:
+      - type: dir
+        path: stage

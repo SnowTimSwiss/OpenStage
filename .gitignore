@@ -18,6 +18,14 @@ src-tauri/**/*.log
 src-tauri/resources/libreoffice/*
 !src-tauri/resources/libreoffice/.gitkeep
 
+# ── Flatpak ──────────────────────────────────────────────────────────────────
+# flatpak/stage/ is unpacked from the built .deb by CI, build/ and repo/ are
+# flatpak-builder output. Only the manifest is tracked.
+flatpak/stage/
+flatpak/build/
+flatpak/repo/
+.ci-packaging/
+
 # ── Environment ──────────────────────────────────────────────────────────────
 .env
 .env.local
