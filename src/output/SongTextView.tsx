@@ -1,9 +1,9 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
-interface SongAllSlidesViewProps {
-  /** Combined song text, verse blocks separated by blank lines. */
+interface SongTextViewProps {
+  /** Song text; blank lines separate verse blocks (never split across columns). */
   text: string;
-  /** Smaller min/max font range for embedded previews. */
+  /** Smaller font range and gaps for the embedded operator previews. */
   compact?: boolean;
 }
 
@@ -13,19 +13,28 @@ interface FitLayout {
 }
 
 /**
- * Renders a whole song on a single slide and automatically picks the largest
- * font size (and 1- vs 2-column layout) that fits the available space without
- * overflowing. Verse blocks are kept intact (never split across columns).
+ * Renders song text at the largest font size that still fits the box it is
+ * given. Used for single-verse slides as well as "whole song on one slide":
+ * blank-line separated verse blocks stay intact and are only split into two
+ * columns when that buys a noticeably larger font. Because the text is always
+ * fitted to its box it can never grow past the screen or run over the
+ * title/artist footer.
  */
-export default function SongAllSlidesView({ text, compact = false }: SongAllSlidesViewProps) {
+export default function SongTextView({ text, compact = false }: SongTextViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const [layout, setLayout] = useState<FitLayout>({ fontSize: compact ? 14 : 32, columns: 1 });
+  const [layout, setLayout] = useState<FitLayout>({ fontSize: compact ? 13 : 32, columns: 1 });
 
-  const blocks = text
-    .split(/\n{2,}/)
-    .map((block) => block.trim())
-    .filter(Boolean);
+  const blocks = useMemo(
+    () =>
+      text
+        .split(/\n{2,}/)
+        .map((block) => block.trim())
+        .filter(Boolean),
+    [text]
+  );
+  const canUseTwoColumns = blocks.length > 1;
+  const minFont = compact ? 7 : 14;
 
   useLayoutEffect(() => {
     const container = containerRef.current;
@@ -35,28 +44,27 @@ export default function SongAllSlidesView({ text, compact = false }: SongAllSlid
     const measure = () => {
       const availW = container.clientWidth;
       const availH = container.clientHeight;
-      if (availW === 0 || availH === 0) return;
+      if (availW <= 0 || availH <= 0) return;
 
-      const MIN = compact ? 7 : 14;
-      const MAX = Math.max(MIN, Math.min(compact ? 30 : 96, availH * 0.16));
+      const maxFont = Math.max(minFont, Math.min(compact ? 30 : 96, availH * 0.16));
 
       const prevFontSize = content.style.fontSize;
       const prevColumns = content.style.columnCount;
 
-      // Returns true if the content fits within the available box at the
-      // given font size / column count. Mutates the node and forces a reflow.
+      // True when the content fits the box at the given font size / columns.
+      // Mutates the node and forces a reflow.
       const fits = (fontSize: number, columns: number) => {
         content.style.fontSize = `${fontSize}px`;
         content.style.columnCount = String(columns);
         return content.scrollHeight <= availH + 1 && content.scrollWidth <= availW + 1;
       };
 
-      // Largest font size (within [MIN, MAX]) that fits for a given column count.
+      // Largest font size (within [minFont, maxFont]) that fits for a column count.
       const bestFontFor = (columns: number) => {
-        if (!fits(MIN, columns)) return MIN; // even minimum overflows → clamp
-        let lo = MIN;
-        let hi = MAX;
-        let best = MIN;
+        if (!fits(minFont, columns)) return minFont; // even the minimum overflows → clamp
+        let lo = minFont;
+        let hi = maxFont;
+        let best = minFont;
         while (hi - lo > 0.5) {
           const mid = (lo + hi) / 2;
           if (fits(mid, columns)) {
@@ -70,7 +78,7 @@ export default function SongAllSlidesView({ text, compact = false }: SongAllSlid
       };
 
       const oneCol = { columns: 1, fontSize: bestFontFor(1) };
-      const twoCol = { columns: 2, fontSize: blocks.length > 1 ? bestFontFor(2) : 0 };
+      const twoCol = { columns: 2, fontSize: canUseTwoColumns ? bestFontFor(2) : 0 };
 
       // Prefer a single column unless two columns are meaningfully larger.
       const chosen = twoCol.fontSize > oneCol.fontSize * 1.15 ? twoCol : oneCol;
@@ -86,8 +94,23 @@ export default function SongAllSlidesView({ text, compact = false }: SongAllSlid
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(container);
-    return () => observer.disconnect();
-  }, [text, compact, blocks.length]);
+
+    // Re-fit once the webfont is loaded: measuring against the fallback font
+    // would pick a size that overflows with the real one.
+    let cancelled = false;
+    if (typeof document !== "undefined" && document.fonts) {
+      document.fonts.ready
+        .then(() => {
+          if (!cancelled) measure();
+        })
+        .catch(() => undefined);
+    }
+
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+    };
+  }, [text, compact, canUseTwoColumns, minFont]);
 
   return (
     <div
@@ -98,12 +121,12 @@ export default function SongAllSlidesView({ text, compact = false }: SongAllSlid
         ref={contentRef}
         className="text-white"
         style={{
+          width: "100%",
           fontSize: `${layout.fontSize}px`,
           columnCount: layout.columns,
           columnGap: compact ? "1.5rem" : "4rem",
           columnFill: "balance",
           textAlign: "center",
-          maxWidth: "100%",
           fontFamily: "'Sora', sans-serif",
           fontWeight: 300,
           lineHeight: 1.3,

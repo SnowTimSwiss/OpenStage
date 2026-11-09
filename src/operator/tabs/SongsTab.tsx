@@ -5,7 +5,7 @@ import { save as saveFile, open as openFile } from "@tauri-apps/plugin-dialog";
 import { writeFile, readFile } from "@tauri-apps/plugin-fs";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { getSongEffectiveSlideCount, getSongPresentation } from "../../lib/songPresentation";
-import SongAllSlidesView from "../../output/SongAllSlidesView";
+import SongTextView from "../../output/SongTextView";
 
 type View = "list" | "editor" | "live";
 
@@ -224,7 +224,7 @@ export default function SongsTab() {
               className="flex-1 min-h-0 rounded-lg overflow-hidden bg-black px-6 py-5"
               style={{ border: "1px solid #f9731640" }}
             >
-              <SongAllSlidesView text={getSongPresentation(activeSong, 0).text} compact />
+              <SongTextView text={getSongPresentation(activeSong, 0).text} compact />
             </div>
           </div>
         ) : (

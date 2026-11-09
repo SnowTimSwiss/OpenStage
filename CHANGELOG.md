@@ -2,6 +2,30 @@
 
 Alle wesentlichen Änderungen an OpenStage werden in dieser Datei dokumentiert.
 
+## [2.0.1] - 2026-11-09
+
+### Behoben
+- **Lieddarstellung in der Ausgabe** – Der Liedtext passt sich jetzt auch auf
+  einzelnen Folien automatisch dem verfügbaren Platz an
+  - Schriftgröße wird so groß wie möglich gewählt, nichts läuft mehr über den
+    Bildschirm hinaus
+  - Titel und Interpret sind Teil des Layouts statt einer Überlagerung — der
+    Text kann nicht mehr darüber laufen
+  - Das erst später geladene Webfont wird beim Einpassen berücksichtigt
+  - Vorschau im Operator und im Lieder-Tab entspricht exakt der Ausgabe
+- **Blackout** – Bleibt jetzt wirklich schwarz, bis er ausgeschaltet wird
+  - Das Ausgabefenster hält den Blackout selbst und ignoriert alle Bilder, die
+    währenddessen auf die Ausgabe gehen
+  - „Leeren" hebt den Blackout nicht mehr auf
+  - Countdown-Ende blendet auf eine schwarze Folie statt in den Blackout-Modus
+    (dadurch erschien beim nächsten Umschalten wieder „00:00")
+- **Suche im „Add to Show"-Dialog** – Der Fokus bleibt im Suchfeld, wenn man
+  zwischen Medien, Songs, PowerPoint, Musik und Diashow wechselt
+
+### Geändert
+- **Versionsanzeige** – Die Version im Kopfbereich wird aus `package.json`
+  gelesen, statt fest im Code zu stehen
+
 ## [2.0.0] - 2026-08-23
 
 ### Hinzugefügt

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { OUTPUT_EVENT, OUTPUT_READY_EVENT, VIDEO_CTRL_EVENT } from "../lib/events";
+import { OUTPUT_EVENT, OUTPUT_READY_EVENT, VIDEO_CTRL_EVENT, BLACKOUT_EVENT } from "../lib/events";
 import type { OutputPayload } from "../types";
 import OutputRenderer from "./OutputRenderer";
 
@@ -9,6 +9,9 @@ export default function OutputApp() {
   const [state, setState] = useState<OutputPayload>({ mode: "blank" });
   const [pendingState, setPendingState] = useState<OutputPayload | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  // Latched by the blackout switch, not by a payload: while this is on the
+  // window shows nothing but black, no matter what reaches it.
+  const [blackout, setBlackout] = useState(false);
   const [videoError, setVideoError] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const transitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -77,8 +80,13 @@ export default function OutputApp() {
     let disposed = false;
     let unlistenOutput: (() => void) | null = null;
     let unlistenCtrl: (() => void) | null = null;
+    let unlistenBlackout: (() => void) | null = null;
 
     const setupListeners = async () => {
+      unlistenBlackout = await listen<{ active: boolean }>(BLACKOUT_EVENT, (e) => {
+        setBlackout(Boolean(e.payload?.active));
+      });
+
       unlistenOutput = await listen<OutputPayload>(OUTPUT_EVENT, (e) => {
         console.log("[OutputApp] Received output event:", e.payload);
         const next = e.payload;
@@ -118,6 +126,7 @@ export default function OutputApp() {
       if (disposed) {
         unlistenOutput?.();
         unlistenCtrl?.();
+        unlistenBlackout?.();
         return;
       }
 
@@ -134,21 +143,28 @@ export default function OutputApp() {
       }
       unlistenOutput?.();
       unlistenCtrl?.();
+      unlistenBlackout?.();
     };
   }, []);
 
+  // Nothing but black while blackout is latched. The renderer stays mounted
+  // underneath, so payloads keep being applied (and a running video keeps its
+  // position) — turning blackout off just reveals the current state.
   return (
-    <OutputRenderer
-      state={state}
-      isTransitioning={isTransitioning}
-      videoRef={videoRef}
-      videoError={videoError}
-      onVideoEnded={() => {
-        currentModeRef.current = "blank";
-        setState({ mode: "blank" });
-      }}
-      onVideoError={() => setVideoError(true)}
-      onVideoPlay={() => setVideoError(false)}
-    />
+    <div className="relative w-screen h-screen bg-black overflow-hidden">
+      <OutputRenderer
+        state={state}
+        isTransitioning={isTransitioning}
+        videoRef={videoRef}
+        videoError={videoError}
+        onVideoEnded={() => {
+          currentModeRef.current = "blank";
+          setState({ mode: "blank" });
+        }}
+        onVideoError={() => setVideoError(true)}
+        onVideoPlay={() => setVideoError(false)}
+      />
+      {blackout && <div className="absolute inset-0 bg-black" style={{ zIndex: 50 }} />}
+    </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useStore } from "../store/useStore";
+import { APP_VERSION } from "../lib/appVersion";
 
 const MODE_LABELS: Record<string, string> = {
   blank: "Nichts",
@@ -54,7 +55,7 @@ export default function Header() {
             className="text-xs px-1.5 py-0.5 rounded"
             style={{ background: "#1f1f1f", color: "#666" }}
           >
-            v1.4.1
+            v{APP_VERSION}
           </span>
         </div>
 

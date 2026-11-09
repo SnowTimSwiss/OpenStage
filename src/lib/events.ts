@@ -6,6 +6,7 @@ import type { OutputPayload } from "../types";
 export const OUTPUT_EVENT = "openstage:output";
 export const OUTPUT_READY_EVENT = "openstage:output-ready";
 export const VIDEO_CTRL_EVENT = "openstage:video-ctrl";
+export const BLACKOUT_EVENT = "openstage:blackout";
 
 let outputWindowOpening: Promise<WebviewWindow> | null = null;
 let lastOutputPayload: OutputPayload = { mode: "blank" };
@@ -46,6 +47,20 @@ export async function sendToOutput(payload: OutputPayload, opts: { force?: boole
 /** Get the most recently broadcast output payload */
 export function getLastOutputPayload(): OutputPayload {
   return lastOutputPayload;
+}
+
+/**
+ * Authoritative blackout switch for the output windows. Unlike the payloads it
+ * is not gated and not replaceable: once an output window has latched
+ * `active: true` it keeps the screen black until it explicitly receives
+ * `active: false`, whatever else arrives in between.
+ */
+export async function sendBlackout(active: boolean) {
+  try {
+    await emit(BLACKOUT_EVENT, { active });
+  } catch (err) {
+    console.warn("Failed to send blackout:", err);
+  }
 }
 
 /** Send video control: play | pause to all output windows */

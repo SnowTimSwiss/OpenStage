@@ -11,6 +11,7 @@ import {
   closeOutputWindowForMonitor,
   closeAllOutputWindows as closeAllOutputFn,
   setOutputBlackoutActive,
+  sendBlackout,
   OUTPUT_READY_EVENT,
 } from "../lib/events";
 import { secondsUntilTargetTime } from "../lib/formatTime";
@@ -95,9 +96,11 @@ function initOutputReplayListener() {
     // A window opened during blackout has to come up black, not with whatever
     // is staged behind it.
     if (useStore.getState().isBlackout) {
+      void sendBlackout(true);
       void sendToOutput({ mode: "blackout" }, { force: true });
       return;
     }
+    void sendBlackout(false);
     void sendToOutput(getLastOutputPayload());
   });
 }
@@ -737,10 +740,10 @@ export const useStore = create<Store>((set, get) => ({
   outputMode: "blank",
   isBlackout: false,
 
-  // Blackout is a kill switch: only these two actions (and the B key, which
-  // calls toggleBlackout) can lift it. Going live with a slide/song/video while
-  // it is on stages that content behind the black screen instead of revealing
-  // it — the outputs stay black until the operator says otherwise.
+  // Blackout is a kill switch: only toggleBlackout() (the button and the B key)
+  // can lift it. Going live with a slide/song/video while it is on stages that
+  // content behind the black screen instead of revealing it — the outputs stay
+  // black until the operator says otherwise.
   toggleBlackout: () => {
     if (!get().isBlackout) {
       // set() closes the gate synchronously via the subscription below, so the
@@ -759,7 +762,9 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   clearOutput: () => {
-    set({ outputMode: "blank", isBlackout: false, activeSlideId: null, activeVideoId: null });
+    // Clearing never takes the screens out of blackout: the content goes away,
+    // the black stays until the operator switches it off explicitly.
+    set({ outputMode: "blank", activeSlideId: null, activeVideoId: null });
     void sendToOutput({ mode: "blank" });
   },
 
@@ -1293,8 +1298,11 @@ export const useStore = create<Store>((set, get) => ({
         });
 
         countdownFadeOutTimeout = setTimeout(() => {
-          sendToOutput({ mode: "blackout" });
-          set({ outputMode: "blackout" });
+          // Fade to a plain black blank slide, not to the "blackout" mode: that
+          // mode belongs to the operator's kill switch, and reusing it here left
+          // the screens black while isBlackout stayed off.
+          sendToOutput({ mode: "blank" });
+          set({ outputMode: "blank" });
           countdownFadeOutTimeout = null;
         }, 1200);
       }, countdownDisplayAfterZeroSeconds * 1000);
@@ -2767,10 +2775,14 @@ function applyShowMusicForItem(item: ShowItem | undefined) {
 }
 
 // The output gate mirrors isBlackout, so every path that flips the flag (the
-// blackout button, the B key, clearOutput) opens/closes the gate as well.
+// blackout button, the B key, ...) opens/closes the gate as well. The output
+// windows additionally latch the flag themselves via BLACKOUT_EVENT: even if a
+// payload slips past the gate, their screen stays black until the switch is
+// turned off.
 useStore.subscribe((state, prevState) => {
   if (prevState && state.isBlackout === prevState.isBlackout) return;
   setOutputBlackoutActive(state.isBlackout);
+  void sendBlackout(state.isBlackout);
 });
 
 // Restart/stop show music when the show navigates onto/off a music item.

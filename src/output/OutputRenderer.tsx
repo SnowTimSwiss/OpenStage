@@ -1,6 +1,6 @@
 import type { RefObject } from "react";
 import type { OutputPayload } from "../types";
-import SongAllSlidesView from "./SongAllSlidesView";
+import SongTextView from "./SongTextView";
 
 function formatTime(s: number) {
   const m = Math.floor(s / 60);
@@ -112,14 +112,12 @@ export default function OutputRenderer({
   }
 
   if (mode === "song" && state.song) {
-    const isAllSlides = state.song.allSlides === true;
-    const songFontSizeValue = compact
-      ? "clamp(0.75rem, 1.6vw, 1.15rem)"
-      : "clamp(2rem, 5vw, 5rem)";
-
+    // Text area and footer share the screen through flex, so the lyrics can
+    // never grow over the title/artist line; the text itself is auto-fitted to
+    // the space that is left (see SongTextView).
     return (
       <div
-        className={`${rootClassName} bg-black flex flex-col items-center justify-center px-20 transition-opacity duration-300 relative`}
+        className={`${rootClassName} bg-black overflow-hidden transition-opacity duration-300 relative`}
         style={{
           ...transitionStyle,
           backgroundImage: state.song.backgroundImage ? `url(${state.song.backgroundImage})` : undefined,
@@ -136,49 +134,40 @@ export default function OutputRenderer({
           }}
         />
 
-        <div className="relative z-10 flex flex-col items-center justify-center w-full h-full pb-24">
-          {isAllSlides ? (
-            <SongAllSlidesView text={state.song.text} compact={compact} />
-          ) : (
-            <p
-              className="text-white leading-snug whitespace-pre-line"
-              style={{
-                fontSize: songFontSizeValue,
-                fontFamily: "'Sora', sans-serif",
-                fontWeight: 300,
-                textShadow: "0 2px 20px rgba(0,0,0,0.8)",
-                letterSpacing: "0.01em",
-              }}
-            >
-              {state.song.text}
-            </p>
-          )}
-        </div>
+        <div
+          className={`relative z-10 flex h-full w-full flex-col ${
+            compact ? "px-4 py-3" : "px-8 pt-10 pb-8"
+          }`}
+        >
+          <div className={`flex-1 min-h-0 w-full ${compact ? "" : "px-12"}`}>
+            <SongTextView text={state.song.text} compact={compact} />
+          </div>
 
-        {/* Artist / Titel unten links */}
-        <div className="absolute bottom-8 left-8 text-left z-10">
-          {state.song.title && (
+          {/* Artist / Titel unten links — part of the layout, not an overlay */}
+          <div className={`shrink-0 text-left ${compact ? "pt-2" : "pt-6"}`}>
+            {state.song.title && (
+              <p
+                className="text-white font-medium"
+                style={{
+                  fontSize: compact ? "1rem" : "1.75rem",
+                  fontFamily: "'Sora', sans-serif",
+                  textShadow: "0 2px 20px rgba(0,0,0,0.8)",
+                }}
+              >
+                {state.song.title}
+              </p>
+            )}
             <p
-              className="text-white font-medium"
+              className="text-white/60"
               style={{
-                fontSize: compact ? "1rem" : "1.75rem",
+                fontSize: compact ? "0.75rem" : "1.25rem",
                 fontFamily: "'Sora', sans-serif",
                 textShadow: "0 2px 20px rgba(0,0,0,0.8)",
               }}
             >
-              {state.song.title}
+              {state.song.artist || "Unbekannter Künstler"}
             </p>
-          )}
-          <p
-            className="text-white/60"
-            style={{
-              fontSize: compact ? "0.75rem" : "1.25rem",
-              fontFamily: "'Sora', sans-serif",
-              textShadow: "0 2px 20px rgba(0,0,0,0.8)",
-            }}
-          >
-            {state.song.artist || "Unbekannter Künstler"}
-          </p>
+          </div>
         </div>
       </div>
     );

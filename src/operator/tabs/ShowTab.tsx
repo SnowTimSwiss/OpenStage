@@ -921,6 +921,21 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, sl
   const backgroundImage = musicBackgroundImage ?? songBackgroundImage;
   const [searchQuery, setSearchQuery] = useState("");
   const normalizedSearch = searchQuery.trim().toLowerCase();
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  // "Countdown" and "Folien" have nothing to search, so the field is hidden there.
+  const searchVisible = activeSection !== "countdown" && activeSection !== "blank";
+
+  // Clicking a section tab moves focus onto that button, which left the search
+  // field unfocused — the operator had to click into it before typing. Put the
+  // focus (and the caret at the end) back whenever the field is on screen.
+  useEffect(() => {
+    if (!searchVisible) return;
+    const input = searchInputRef.current;
+    if (!input) return;
+    input.focus();
+    const end = input.value.length;
+    input.setSelectionRange(end, end);
+  }, [searchVisible, activeSection]);
 
   function matchesSearch(...values: Array<string | undefined | null>) {
     if (!normalizedSearch) return true;
@@ -1018,16 +1033,16 @@ function AddToShowModal({ slides, videos, songs, pdfGroups, music, playlists, sl
           </button>
         </div>
 
-        {activeSection !== "countdown" && activeSection !== "blank" && (
+        {searchVisible && (
           <div className="px-3 py-3 border-b" style={{ borderColor: "#333" }}>
             <input
+              ref={searchInputRef}
               type="search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Suchen..."
               className="w-full px-3 py-2 rounded-lg text-sm outline-none"
               style={{ background: "#0d0d0d", color: "#ddd", border: "1px solid #333" }}
-              autoFocus
             />
           </div>
         )}
