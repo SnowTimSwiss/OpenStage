@@ -11,13 +11,44 @@ env:
   CARGO_TERM_COLOR: always
   APP_NAME: openstage
   # Headless LibreOffice bundled into every installer so PPTX import works
-  # with nothing for the user to install. Bump deliberately; each bump
-  # invalidates the LO download caches below.
-  LIBREOFFICE_VERSION: '26.2.5'
+  # with nothing for the user to install. Only the release branch is pinned
+  # here; the newest available patch release inside that branch is resolved
+  # at build time (see resolve-libreoffice). Pinning an exact patch version
+  # is not stable: the Document Foundation prunes superseded point releases
+  # from /libreoffice/stable/, which turns a hardcoded patch into a 404.
+  # Bump the branch deliberately; each resolved patch invalidates the LO
+  # download caches below.
+  LIBREOFFICE_BRANCH: '26.8'
 
 jobs:
+  resolve-libreoffice:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Resolve newest LibreOffice patch in pinned branch
+        id: resolve
+        run: |
+          set -euo pipefail
+          branch="$LIBREOFFICE_BRANCH"
+          listing=$(curl -fsSL --retry 3 https://download.documentfoundation.org/libreoffice/stable/)
+          version=$(printf '%s\n' "$listing" \
+            | grep -oE "href=\"${branch//./\\.}\.[0-9]+/" \
+            | sed -E 's#href="##; s#/$##' \
+            | sort -V | tail -n1 || true)
+          if [ -z "$version" ]; then
+            echo "No LibreOffice release matching ${branch}.x found in /libreoffice/stable/" >&2
+            echo "Set LIBREOFFICE_BRANCH to a branch that still has releases." >&2
+            exit 1
+          fi
+          echo "Resolved LibreOffice $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
   build-windows:
     runs-on: windows-latest
+    needs: resolve-libreoffice
+    env:
+      LIBREOFFICE_VERSION: ${{ needs.resolve-libreoffice.outputs.version }}
     strategy:
       matrix:
         target:
@@ -122,7 +153,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-macos-intel:
-    runs-on: macos-13
+    # macos-13 was retired by GitHub in Dec 2025; macos-15-intel is the
+    # remaining hosted x86_64 image (supported until ~Aug 2027).
+    runs-on: macos-15-intel
+    needs: resolve-libreoffice
+    env:
+      LIBREOFFICE_VERSION: ${{ needs.resolve-libreoffice.outputs.version }}
     strategy:
       matrix:
         target:
@@ -221,6 +257,9 @@ jobs:
 
   build-macos-arm:
     runs-on: macos-latest
+    needs: resolve-libreoffice
+    env:
+      LIBREOFFICE_VERSION: ${{ needs.resolve-libreoffice.outputs.version }}
     strategy:
       matrix:
         target:
@@ -319,6 +358,9 @@ jobs:
 
   build-linux:
     runs-on: ubuntu-latest
+    needs: resolve-libreoffice
+    env:
+      LIBREOFFICE_VERSION: ${{ needs.resolve-libreoffice.outputs.version }}
     strategy:
       matrix:
         target:
